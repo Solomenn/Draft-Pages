@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GSPO 逐步讲解</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #16202b; --muted: #5d6b7a; --line: #c9d1da;
+    --accent: #0b6e8a; --warm: #a8650c; --proc: #e3f1f5; --good: #2f8a4f; --bad: #b42318; --purple: #7b4fb3;
+    --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f151b; --panel: #161e26; --ink: #e6edf3; --muted: #93a1b0; --line: #2c3844;
+      --accent: #4cc0df; --warm: #f0b44c; --proc: #16303a; --good: #62d48a; --bad: #ff7b72; --purple: #b99bf0; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+  .wrap { padding: 24px 16px 40px; }
+  .view { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .view[hidden] { display: none; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0; text-wrap: balance; }
+  .gist { margin: -6px 0 0; font-size: 16px; line-height: 1.7; max-width: 48em; }
+
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  svg.diagram { display: block; width: 100%; height: auto; font-family: var(--font-body); }
+  .colhead { fill: var(--muted); font-size: 13px; font-weight: 500; }
+
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  .title { fill: var(--ink); font-family: var(--font-code); font-size: 13.5px; font-weight: 600; }
+  .titlecn { fill: var(--ink); font-size: 14px; font-weight: 700; }
+  .sub { fill: var(--muted); font-size: 12.5px; }
+  .node { opacity: 0.25; transition: opacity .45s; }
+  .node.on, .node.sel { opacity: 1; }
+  .node.hot .box { stroke: var(--accent); stroke-width: 3; }
+  .node.sel .box { stroke: var(--ink); stroke-width: 3; stroke-dasharray: 7 4; }
+  .node.proc .box { fill: var(--proc); }
+  .clickable { cursor: pointer; outline: none; }
+  .clickable:hover .box { stroke: var(--ink); }
+  .clickable:focus-visible .box { stroke: var(--ink); stroke-width: 3; }
+  .node.ghost .box { fill: none; stroke-dasharray: 6 4; stroke: var(--muted); }
+  .node.ghost .titlecn { fill: var(--muted); }
+  .node.ghost.hot .box { stroke: var(--accent); stroke-width: 2.5; }
+  .sw.ghost { border: 1.5px dashed var(--muted); background: transparent; }
+  .stack { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+
+  .info circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; }
+  .info text { fill: var(--muted); font-family: var(--font-code); font-size: 12px; font-weight: 600; }
+  .clickable:hover .info circle, .sel .info circle { fill: var(--ink); stroke: var(--ink); }
+  .clickable:hover .info text, .sel .info text { fill: var(--panel); }
+
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  .link { fill: none; stroke: var(--accent); stroke-width: 2.2; animation: fadein .45s; }
+  .link.back { stroke: var(--muted); stroke-dasharray: 5 4; }
+  .link.warm { stroke: var(--warm); }
+  .linklabel { fill: var(--accent); font-family: var(--font-code); font-size: 12px; font-weight: 600; animation: fadein .45s; }
+  .linklabel.muted { fill: var(--muted); font-family: var(--font-body); font-weight: 500; }
+  .linklabel.warm { fill: var(--warm); }
+
+  .chip rect { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+  .chip text { fill: var(--muted); font-family: var(--font-code); font-size: 13px; }
+  .chip.found rect { fill: var(--accent); stroke: var(--accent); }
+  .chip.found text { fill: #fff; font-weight: 600; }
+  .chip.new rect { fill: var(--warm); stroke: var(--warm); animation: fadein .45s; }
+  .chip.new text { fill: #fff; font-weight: 600; }
+  .chip.empty rect { fill: var(--panel); stroke-dasharray: 4 3; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.found text, :root:not([data-theme="light"]) .chip.new text { fill: #0f151b; } }
+
+  .gtitle { fill: var(--ink); font-size: 13px; font-weight: 700; }
+  .gtitle .code { font-family: var(--font-code); }
+  .glabel { fill: var(--muted); font-size: 12.5px; font-family: var(--font-code); }
+  .cell rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+  .cell .heat { stroke: none; fill: var(--accent); }
+  .cell text { font-family: var(--font-code); font-size: 12px; fill: var(--ink); }
+  .cell.hi rect.bg { fill: color-mix(in srgb, var(--warm) 22%, var(--panel)); stroke: var(--warm); }
+  .cell.dark text { fill: #fff; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cell.dark text { fill: #0f151b; } }
+  .cell.masked rect.bg { fill: var(--line); stroke: var(--line); }
+  .cell.masked text { fill: var(--muted); }
+  .cell.ok rect.bg { fill: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+  .cell.ok text { fill: var(--accent); font-weight: 600; }
+  .sw.ok { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+  .cell.blank rect.bg { fill: var(--panel); stroke-dasharray: 3 3; }
+  .cell.cut rect.bg { fill: color-mix(in srgb, var(--bad) 14%, var(--panel)); stroke: var(--bad); stroke-width: 2; }
+  .cell.cut text { fill: var(--bad); font-weight: 600; }
+  .sw.cut { background: color-mix(in srgb, var(--bad) 14%, var(--panel)); border: 2px solid var(--bad); }
+  .formula { fill: var(--muted); font-size: 12.5px; }
+  .axis { stroke: var(--muted); stroke-width: 1.2; fill: none; }
+  .guide { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 4 4; }
+  .curve { fill: none; stroke: var(--accent); stroke-width: 3; }
+  .curve.flat { stroke: var(--bad); }
+  .dot { fill: var(--warm); }
+  .cell.zero text { fill: var(--muted); opacity: .55; }
+  .gridg { animation: fadein .45s; }
+  .gridg.clickable:hover .gframe { stroke: var(--ink); }
+  .gframe { fill: none; stroke: transparent; stroke-width: 2; }
+  .gridg.hot .gframe { stroke: var(--accent); stroke-width: 2.5; }
+  .region { fill: none; stroke-width: 3; }
+  .region.src { stroke: var(--good); }
+  .region.cross { stroke: var(--warm); }
+  .region.tgt { stroke: var(--purple); }
+  .sw.src { border: 2.5px solid var(--good); background: transparent; }
+  .sw.cross { border: 2.5px solid var(--warm); background: transparent; }
+  .sw.tgt { border: 2.5px solid var(--purple); background: transparent; }
+  .frame { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 2 3; }
+  .divider { stroke: var(--line); stroke-width: 1.5; }
+  .gridg.sel .gframe { stroke: var(--ink); stroke-dasharray: 7 4; }
+  .op { fill: var(--muted); font-family: var(--font-code); font-size: 18px; font-weight: 600; }
+  .bar { fill: var(--line); }
+  .bar.win { fill: var(--accent); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; color: var(--muted); font-size: 13.5px; margin-top: -6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .sw.hot { border: 3px solid var(--accent); background: var(--panel); }
+  .sw.hi { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); border-color: var(--warm); }
+  .sw.heat { background: linear-gradient(90deg, var(--panel), var(--accent)); }
+  .sw.masked { background: var(--line); }
+  .sw.new { background: var(--warm); border-color: var(--warm); }
+  .legend .icon { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--muted); display: inline-grid; place-items: center; font-family: var(--font-code); font-size: 11px; font-weight: 600; }
+
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--ink); border-radius: 14px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .note[hidden] { display: none; }
+  .note-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .note-title { margin: 0; font-family: var(--font-code); font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+  .note-close { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .note-close:hover { border-color: var(--ink); }
+  .note dl { margin: 0; display: grid; grid-template-columns: 8.5em 1fr; gap: 10px 16px; }
+  .note dt { color: var(--muted); font-size: 14px; padding-top: 1px; }
+  .note dd { margin: 0; font-size: 15px; line-height: 1.7; min-width: 0; }
+  .note dd p { margin: 0; }
+  .sample { margin: 0; font-family: var(--font-code); font-size: 12.5px; line-height: 1.55; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow: auto; }
+  .sample-cap { color: var(--muted); font-size: 13.5px; margin-bottom: 4px !important; }
+
+  .caption { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-height: 140px; display: flex; flex-direction: column; gap: 12px; }
+  .caption .say { margin: 0; font-size: 19px; line-height: 1.65; font-weight: 500; max-width: 42em; text-wrap: pretty; }
+  .caption .code { margin: 0; font-family: var(--font-code); font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+  .nav { display: flex; align-items: center; gap: 14px; }
+  .nav button.arrow-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .nav button.arrow-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .nav button.arrow-btn:disabled { opacity: .35; cursor: default; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .dots { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; justify-content: center; }
+  .dots button { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); background: var(--panel); cursor: pointer; }
+  .dots button.done { background: var(--line); }
+  .dots button.now { background: var(--accent); border-color: var(--accent); transform: scale(1.25); }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; min-width: 3.5em; text-align: right; flex: none; }
+
+  @media (min-width: 700px) {
+    .nav button.arrow-btn { position: fixed; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+    .nav .prev { left: 8px; }
+    .nav .next { right: 8px; }
+    .view { padding-inline: 64px; }
+  }
+  @media (min-width: 1200px) {
+    .view { padding-inline: 0; }
+    .nav .prev { left: calc(50% - 592px); }
+    .nav .next { right: calc(50% - 592px); }
+  }
+  @media (max-width: 640px) { .note dl { grid-template-columns: 1fr; gap: 2px 0; } .note dd { margin-bottom: 8px; } }
+  @media (prefers-reduced-motion: reduce) { .node, .link, .linklabel, .gridg, .chip.new rect { transition: none; animation: none; } }
+
+  .tabs { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 14px 16px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .tab { font-family: var(--font-body); font-size: 14px; padding: 7px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .tab:hover { border-color: var(--accent); }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0f151b; } }
+</style>
+<body>
+<nav class="tabs" role="tablist" aria-label="切换页面">
+  <button class="tab" role="tab" id="tab-overview" aria-selected="true">整体：GSPO 一步训练</button>
+  <button class="tab" role="tab" id="tab-ratio" aria-selected="false">比率怎么算</button>
+  <button class="tab" role="tab" id="tab-clip" aria-selected="false">截断怎么变</button>
+</nav>
+<div class="wrap">
+<div class="view" id="o-view">
+  <h1>GSPO 一步训练：Countdown 题 [42, 32, 5] → 50</h1>
+  <p class="gist">本质上是，GSPO 照 GRPO 让模型对一道题写一组回答、比这组平均好的推高、比平均差的压低，只是更新时一个回答只算一个比率，整个回答一起推、一起停。</p>
+  <div class="legend" id="o-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="o-diagram" viewBox="0 0 1000 480" role="group" aria-label="GSPO 一步训练：Countdown 题 [42, 32, 5] → 50">
+      <defs><marker id="o-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="o-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="o-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="o-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="o-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="o-noteTitle"></h2>
+      <button class="note-close" id="o-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="o-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="o-say"></p>
+    <p class="code" id="o-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="o-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="o-dots"></div>
+    <span class="count" id="o-count"></span>
+    <button class="arrow-btn next" id="o-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="r-view" hidden>
+  <h1>比率怎么算：一个回答一个比率</h1>
+  <p class="gist">本质上是，把一个回答里每个 token 的新旧 logp 差取平均，再取 e 的次方，得到这个回答的一个比率，回答里每个 token 都用它。</p>
+  <div class="legend" id="r-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="r-diagram" viewBox="0 0 1000 440" role="group" aria-label="比率怎么算：一个回答一个比率">
+      <defs><marker id="r-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="r-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="r-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="r-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="r-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="r-noteTitle"></h2>
+      <button class="note-close" id="r-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="r-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="r-say"></p>
+    <p class="code" id="r-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="r-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="r-dots"></div>
+    <span class="count" id="r-count"></span>
+    <button class="arrow-btn next" id="r-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="c-view" hidden>
+  <h1>截断怎么变：整个回答一起截断</h1>
+  <p class="gist">本质上是，整个回答的比率一旦往有利方向走出 0.9997 到 1.0004，这个回答的所有 token 这一次就都不再更新。</p>
+  <div class="legend" id="c-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="c-diagram" viewBox="0 0 1000 490" role="group" aria-label="截断怎么变：整个回答一起截断">
+      <defs><marker id="c-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="c-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="c-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="c-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="c-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="c-noteTitle"></h2>
+      <button class="note-close" id="c-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="c-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="c-say"></p>
+    <p class="code" id="c-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="c-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="c-dots"></div>
+    <span class="count" id="c-count"></span>
+    <button class="arrow-btn next" id="c-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</div>
+<script>
+
+var SVGNS = "http://www.w3.org/2000/svg";
+function fmt(v, d) {
+  if (typeof v === "string") return v;
+  if (v === null) return "−∞";
+  d = d === undefined ? 2 : d;
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) return (0).toFixed(d);
+  return (v < 0 ? "−" : "") + Math.abs(v).toFixed(d);
+}
+function vec(row) { return "(" + row.map(fmt).join(", ") + ")"; }
+function col(M, a, b) { return M.map(function (r) { return r.slice(a, b); }); }
+
+/* 一个页面：顶部 h1 和一句话，中间 SVG，点框看说明，下面是这一步的说明和代码，最下面翻页 */
+function makeView(cfg) {
+  var P = cfg.P;
+  var $ = function (id) { return document.getElementById(P + id); };
+  var selected = null, cur = 0;
+
+  function mk(tag, attrs, parent, text) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+  function clickable(g, id) {
+    g.classList.add("clickable");
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button");
+    g.setAttribute("aria-label", cfg.notes[id].title + "，点击查看说明");
+    g.setAttribute("data-id", id);
+    if (id === selected) g.classList.add("sel");
+    g.addEventListener("click", function () { choose(id); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(id); } });
+  }
+  function info(g, cx, cy) {
+    var ic = mk("g", { "class": "info" }, g);
+    mk("circle", { cx: cx, cy: cy, r: 9 }, ic);
+    mk("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, ic, "i");
+  }
+  /* 框：id、x、y、宽、高、标题、小字；s.on 里有它就亮，s.hot 里有它就描蓝边 */
+  function box(root, s, id, x, y, w, h, title, sub, opt) {
+    opt = opt || {};
+    var g = mk("g", { "class": "node" + (s.on.indexOf(id) >= 0 ? " on" : "") + (s.hot.indexOf(id) >= 0 ? " hot" : "") + (opt.proc ? " proc" : "") }, root);
+    if (opt.ghost) g.classList.add("ghost");
+    if (opt.stack) {
+      mk("rect", { "class": "stack", x: x + 10, y: y - 10, width: w, height: h, rx: 10 }, g);
+      mk("rect", { "class": "stack", x: x + 5, y: y - 5, width: w, height: h, rx: 10 }, g);
+    }
+    mk("rect", { "class": "box", x: x, y: y, width: w, height: h, rx: 10 }, g);
+    var oneLine = !sub;
+    mk("text", { "class": opt.cn ? "titlecn" : "title", x: x + 14, y: oneLine ? y + h / 2 + 5 : y + 24 }, g, title);
+    if (sub) mk("text", { "class": "sub", x: x + 14, y: y + 44 }, g, sub);
+    info(g, x + w - 18, oneLine ? y + h / 2 : y + 20);
+    clickable(g, id);
+    return g;
+  }
+  function chip(root, x, y, text, kind) {
+    var w = Math.max(34, text.replace(/[^\x00-\xff]/g, "xx").length * 8 + 18);
+    var g = mk("g", { "class": "chip" + (kind ? " " + kind : "") }, root);
+    mk("rect", { x: x, y: y, width: w, height: 26, rx: 6 }, g);
+    mk("text", { x: x + w / 2, y: y + 18, "text-anchor": "middle" }, g, text);
+    return w;
+  }
+  /* 数字网格：o.rows 行名、o.cols 列名、o.hiRow 跟着看的那一行、o.heat 按数值深浅上色（0–1）、o.zero 把 0 变淡 */
+  function grid(root, x, y, M, o) {
+    o = o || {};
+    var cw = o.cw || 52, ch = 28;
+    var g = mk("g", { "class": "gridg" + (o.hot ? " hot" : "") }, root);
+    var top = y;
+    if (o.title) { mk("text", { "class": "gtitle", x: x, y: y + 13 }, g, o.title); top += 22; }
+    if (o.cols) {
+      o.cols.forEach(function (c, j) { mk("text", { "class": "glabel", x: x + j * cw + cw / 2, y: top + 12, "text-anchor": "middle" }, g, c); });
+      top += 18;
+    }
+    M.forEach(function (row, i) {
+      if (o.rows) mk("text", { "class": "glabel", x: x - 8, y: top + i * ch + 19, "text-anchor": "end" }, g, o.rows[i]);
+      row.forEach(function (v, j) {
+        var hiCell = (o.hiCells && o.hiCells.some(function (c) { return c[0] === i && c[1] === j; })) || (o.hiRow === i) || (o.hiRows && o.hiRows.indexOf(i) >= 0) || (o.hiCols && o.hiCols.indexOf(j) >= 0) || (o.hiAll);
+        var cls = "cell" + (hiCell ? " hi" : "") + (v === null ? " masked" : "") + (v === "✓" ? " ok" : "") + (v === "" ? " blank" : "") + (o.cut && o.cut.some(function (c) { return c[0] === i && c[1] === j; }) ? " cut" : "") + (o.zero && v === 0 ? " zero" : "") + (o.heat && v !== null && v > 0.55 ? " dark" : "");
+        var cg = mk("g", { "class": cls }, g);
+        mk("rect", { "class": "bg", x: x + j * cw, y: top + i * ch, width: cw, height: ch }, cg);
+        if (o.heat && v !== null) mk("rect", { "class": "heat", x: x + j * cw + 1, y: top + i * ch + 1, width: cw - 2, height: ch - 2, "fill-opacity": Math.min(1, v * 0.95) }, cg);
+        mk("text", { x: x + j * cw + cw / 2, y: top + i * ch + 18.5, "text-anchor": "middle" }, cg, fmt(v, o.digRows ? o.digRows[i] : o.dig));
+      });
+    });
+    var w = M[0].length * cw, hgt = top - y + M.length * ch;
+    if (o.id) {
+      mk("rect", { "class": "gframe", x: x - (o.rows ? 52 : 6), y: y - 6, width: w + (o.rows ? 58 : 12), height: hgt + 12, rx: 8 }, g);
+      g.insertBefore(g.lastChild, g.firstChild);
+      if (o.title) { var tw = o.title.replace(/[^\x00-\xff]/g, "xx").length * 6.6; info(g, Math.max(x + w - 6, x + tw + 14), y + 9); }
+      clickable(g, o.id);
+    }
+    return { w: w, h: hgt, bottom: y + hgt, right: x + w };
+  }
+  function arrow(root, d, cls) { return mk("path", { "class": "link" + (cls ? " " + cls : ""), d: d, "marker-end": "url(#" + P + (cls === "back" ? "headm" : cls === "warm" ? "headw" : "head") + ")" }, root); }
+  function label(root, x, y, text, cls, anchor) { return mk("text", { "class": "linklabel" + (cls ? " " + cls : ""), x: x, y: y, "text-anchor": anchor || "start" }, root, text); }
+  var api = { mk: mk, box: box, chip: chip, grid: grid, arrow: arrow, label: label };
+
+  function renderNote(id) {
+    var n = cfg.notes[id];
+    $("noteTitle").textContent = n.title;
+    var dl = $("noteRows"); dl.textContent = "";
+    n.rows.forEach(function (row) {
+      var dt = document.createElement("dt"); dt.textContent = row[0];
+      var dd = document.createElement("dd"); var v = row[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else {
+        if (v.cap) { var pc = document.createElement("p"); pc.className = "sample-cap"; pc.textContent = v.cap; dd.appendChild(pc); }
+        var pre = document.createElement("pre"); pre.className = "sample"; pre.textContent = v.pre; dd.appendChild(pre);
+      }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    document.querySelectorAll("#" + P + "diagram [data-id]").forEach(function (g) { g.classList.toggle("sel", g.getAttribute("data-id") === selected); });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+
+  function show(i) {
+    cur = Math.max(0, Math.min(cfg.steps.length - 1, i));
+    var s = cfg.steps[cur];
+    s.on = s.on || []; s.hot = s.hot || [];
+    var root = $("draw"); root.textContent = "";
+    cfg.draw(api, root, s);
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + cfg.steps.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === cfg.steps.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash(cfg.key, cur + 1);
+  }
+  cfg.steps.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 步");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+  var lg = $("legend");
+  cfg.legend.forEach(function (it) {
+    var s = document.createElement("span");
+    var sw = document.createElement("i");
+    if (it[0] === "info") { sw.className = "icon"; sw.textContent = "i"; } else sw.className = "sw " + it[0];
+    s.appendChild(sw); s.appendChild(document.createTextNode(it[1])); lg.appendChild(s);
+  });
+  show(0);
+  window.__v = window.__v || {};
+  window.__v[cfg.key] = { show: show, cur: function () { return cur; } };
+}
+</script>
+<script>
+var D = {"ans": ["(42 - 32) * 5", "(42 + 32) / 5", "42 + 32 - 5", "42 - 32 + 5"], "score": [1, 0, 0, 0], "adv": [1.5, -0.5, -0.5, -0.5],
+  "tok1": ["(42", " -", " 32)", " *", " 5"], "tok2": ["(42", " +", " 32)", " /", " 5"],
+  "old1": [-1.1, -0.3, -0.9, -0.4, -0.2], "new1": [-0.85, -0.25, -0.88, -0.36, -0.18], "ratio1": [1.284, 1.051, 1.020, 1.041, 1.020],
+  "old2": [-1.1, -1.2, -0.6, -2.0, -0.5], "new2": [-0.85, -1.5, -0.65, -2.6, -0.55], "ratio2": [1.284, 0.741, 0.951, 0.549, 0.951],
+  "seq": [1.0002, 0.9999, 0.9994, 1.0006]};
+</script>
+<script>
+/* 每页共用 */
+function chipW(t) { return Math.max(34, t.replace(/[^\x00-\xff]/g, "xx").length * 8 + 18); }
+function tokRow(A, root, x0, y, cw, toks) {
+  toks.forEach(function (t, j) { t = t.trim(); var cx = x0 + j * cw + cw / 2; A.chip(root, cx - chipW(t) / 2, y, t, "found"); });
+}
+function numRow(A, root, x0, y, cw, label, vals, o) {
+  o = o || {};
+  return A.grid(root, x0, y, [vals], { rows: label === null ? undefined : [label], cw: cw, dig: o.dig === undefined ? 3 : o.dig, hiRow: o.hi ? 0 : undefined, hiCells: (o.hiCols || []).map(function (j) { return [0, j]; }), cut: (o.cut || []).map(function (j) { return [0, j]; }), id: o.id });
+}
+function blanks(n) { var a = []; for (var i = 0; i < n; i++) a.push(""); return a; }
+function n(title, rows) { return { title: title, rows: rows }; }
+function colheads(A, root, x0, cw, y, names) {
+  names.forEach(function (c, j) { A.mk("text", { "class": "colhead", x: x0 + j * cw + cw / 2, y: y, "text-anchor": "middle" }, root, c); });
+}
+function diffs(a, b) { return a.map(function (v, j) { return Math.round((b[j] - v) * 100) / 100; }); }
+function mean(a) { return a.reduce(function (s, v) { return s + v; }, 0) / a.length; }
+
+/* ===== 第 1 页：GSPO 一步训练的全过程 ===== */
+(function () {
+  var MX = 20, MW = 330, AX = 470, AW = 170, SX = 680, SW = 96, VX = 780, RX = 880;
+  var MY = { q: 20, pol: 100, rew: 180, ref: 290, vm: 370 };
+  var RY = [60, 100, 140, 180];
+
+  function draw(A, root, s) {
+    var st = s.stage, hr = s.hotCols || [];
+    var S = { on: ["q", "pol", "rew", "ref", "vm", "ch_seq"], hot: s.hot || [] };
+    A.box(root, S, "q", MX, MY.q, MW, 60, "题目：[42, 32, 5] → 50", "用 + − × ÷ 把 3 个数字各用一次，算出 50", {});
+    A.box(root, S, "pol", MX, MY.pol, MW, 60, "策略模型", "正在训练；对同一道题写一组回答", { cn: true, proc: true });
+    A.box(root, S, "rew", MX, MY.rew, MW, 60, "奖励函数", "答对判 1 分，答错判 0 分", { cn: true });
+    A.box(root, S, "ref", MX, MY.ref, MW, 60, "参考模型", "beta = 0 时不加载", { cn: true, ghost: true });
+    A.box(root, S, "vm", MX, MY.vm, MW, 60, "价值模型", "GSPO 和 GRPO 一样不需要", { cn: true, ghost: true });
+    A.mk("text", { "class": "colhead", x: 420, y: 316 }, root, "GSPO 在 GRPO 上改的 1 处");
+    A.box(root, S, "ch_seq", 420, 330, 560, 60, "一个回答只算一个比率，整个回答一起截断", "比率 = e^(这个回答每个 token 的 新 logp − 旧 logp 的平均)", { cn: true });
+
+    colheads(A, root, AX, AW, 40, ["一组 4 个回答"]);
+    colheads(A, root, SX, SW, 40, ["判分"]);
+    colheads(A, root, VX, SW, 40, ["优势"]);
+    colheads(A, root, RX, SW, 40, ["回答的比率"]);
+    D.ans.forEach(function (a, i) {
+      var y = RY[i], cx = AX + AW / 2;
+      if (st >= 2) A.chip(root, cx - chipW(a) / 2, y + 1, a, "found"); else A.chip(root, cx - 50, y + 1, " ", "empty");
+      A.mk("text", { "class": "glabel", x: AX - 8, y: y + 19, "text-anchor": "end" }, root, "回答 " + (i + 1));
+      numRow(A, root, SX, y, SW, null, [st >= 3 ? String(D.score[i]) : ""], { hi: hr.indexOf("score") >= 0, id: "row_score" });
+      numRow(A, root, VX, y, SW, null, [st >= 4 ? fmt(D.adv[i], 2) : ""], { hi: hr.indexOf("adv") >= 0, id: "row_adv" });
+      numRow(A, root, RX, y, SW, null, [st >= 5 ? fmt(D.seq[i], 4) : ""], { hi: hr.indexOf("seq") >= 0, cut: st >= 5 && i === 2 && s.showCut ? [0] : [], id: "row_seq" });
+    });
+    if (st >= 5 && s.showCut) A.label(root, RX + SW, 238, "回答 3 被截断：比率 0.9994 低于 0.9997", "warm", "end");
+
+    var a = s.arrows || [];
+    if (a.indexOf("write") >= 0) A.arrow(root, "M" + (MX + MW + 2) + " " + (MY.pol + 30) + " H400 V114 H" + (AX + 4));
+    if (a.indexOf("rew") >= 0) A.arrow(root, "M" + (MX + MW + 2) + " " + (MY.rew + 30) + " H660 V" + (RY[3] + 42) + " H" + (SX + SW / 2) + " V" + (RY[3] + 32));
+  }
+
+  var STEPS = [
+    { stage: 1, hot: ["q"],
+      say: "这一页跟着 GRPO 页的同一道 Countdown 题走一遍 GSPO 的一步训练。GSPO 是阿里 Qwen 团队 2025 年提出的算法。写一组回答、判分、按这组的平均和标准差算优势，都和 GRPO 一样；GSPO 只改了更新时的比率（右下的框）：GRPO 给回答里的每个 token 各算一个比率，GSPO 给整个回答只算一个。",
+      code: "prompt = \"Using the numbers [42, 32, 5], create an equation that equals 50. ...\"" },
+    { stage: 2, hot: ["pol"], arrows: ["write"],
+      say: "策略模型读同一道题，写出一组回答，例子用 4 个，和 GRPO 页一样：回答 1 是“(42 - 32) * 5”，回答 2 是“(42 + 32) / 5”，回答 3 是“42 + 32 - 5”，回答 4 是“42 - 32 + 5”。论文的实验模型是从 Qwen3-30B-A3B-Base 微调来的冷启动模型。",
+      code: "completions = generate(policy, [prompt] * num_generations)   # 例子用 4 个" },
+    { stage: 3, hot: ["rew"], hotCols: ["score"], arrows: ["rew"],
+      say: "奖励函数给每个回答判分：回答 1 等于 50，判 1 分；回答 2、3、4 算不出 50，判 0 分。判分是给整个回答的，一个回答一个分。",
+      code: "rewards = [reward_countdown(c, nums=[42, 32, 5], target=50) for c in completions]   # [1, 0, 0, 0]" },
+    { stage: 4, hotCols: ["adv"],
+      say: "优势和 GRPO 一样算：(判分 − 平均) ÷ 标准差。回答 1 是 1.5，回答 2、3、4 是 −0.5。",
+      code: "advantages = (rewards - mean_grouped_rewards) / (std_rewards + 1e-4)   # [1.5, −0.5, −0.5, −0.5]" },
+    { stage: 5, hot: ["ch_seq", "pol"], hotCols: ["seq"],
+      say: "更新时，GSPO 给每个回答算一个比率：把这个回答里每个 token 的“新 logp − 旧 logp”取平均，再取 e 的次方。这一批写完回答后，策略模型已经更新过几次，4 个回答的比率是 1.0002、0.9999、0.9994、1.0006，都很接近 1（“比率怎么算”那一页逐步算）。",
+      code: "log_importance_weights = (log_ratio * mask).sum(-1) / mask.sum(-1)   # 每个回答一个数\ncoef_1 = torch.exp(log_importance_weights)" },
+    { stage: 5, hot: ["ch_seq"], hotCols: ["seq"], showCut: true,
+      say: "截断也按整个回答来：论文把回答的比率限制在 1 − 0.0003 = 0.9997 到 1 + 0.0004 = 1.0004。回答 3 的优势为负、比率 0.9994 低于 0.9997，已经压得够低，整个回答的 5 个 token 这一次都不再被压低。其余 3 个回答照常更新（“截断怎么变”那一页逐步算）。",
+      code: "coef_2 = torch.clamp(coef_1, 1 - 3e-4, 1 + 4e-4)\nper_token_loss = -torch.min(coef_1 * advantages, coef_2 * advantages)" },
+    { stage: 5, showCut: true, hot: ["ch_seq"],
+      say: "损失按回答来平均：先在每个回答里求平均，再在回答之间求平均，也就是 TRL 的 loss_type = \"grpo\"。DAPO 页讲的 loss_type = \"dapo\" 按 token 总个数平均，和 GSPO 一起用时，长回答因为 token 多会占更大的份量，TRL 会为此打警告：要复现 GSPO 论文，得用 \"grpo\"。",
+      code: "loss = ((per_token_loss * mask).sum(-1) / mask.sum(-1)).mean()   # loss_type = \"grpo\"" },
+    { stage: 5, showCut: true, hot: ["ref"],
+      say: "TRL 复现论文的配置里 beta = 0：损失里没有 KL，参考模型不加载。价值模型也和 GRPO 一样不需要。",
+      code: "beta = 0.0" },
+    { stage: 5, showCut: true, hot: ["ch_seq"],
+      say: "为什么要改：论文说，GRPO 每个 token 的比率只来自采到的那一个 token，起不到修正分布的作用，只带来噪声；回答越长，噪声积得越多，截断又把它放大，训练可能崩掉，而且往往救不回来。判分是给整个回答的，所以比率也应该按整个回答算。",
+      code: "# 判分的单位是回答 → 比率和截断的单位也是回答" },
+    { stage: 5, showCut: true, hot: ["pol"],
+      say: "对 MoE 模型影响更大：论文测到，在 48 层的 Qwen3-30B-A3B-Base 上，每更新一次，同一个回答激活的专家大约有 10% 会变，每个 token 的比率跟着乱跳。GRPO 得靠 Routing Replay（把写回答时用的专家记下来，算比率时照用）才稳；GSPO 只看整个回答的概率，不需要它。论文说 GSPO 对最新 Qwen3 模型的提升有贡献。",
+      code: "GRPOConfig(importance_sampling_level=\"sequence\", loss_type=\"grpo\", beta=0.0,\n           epsilon=3e-4, epsilon_high=4e-4, gradient_accumulation_steps=1, steps_per_generation=4)" }
+  ];
+
+  var NOTES = {
+    q: n("题目", [["是什么", "Countdown 题：3 个数字和一个目标数，用 + − × ÷ 把每个数字恰好用一次，算出目标数。"], ["例子", "[42, 32, 5] → 50，一个对的回答是 (42 − 32) × 5。"]]),
+    pol: n("策略模型", [["是什么", "正在训练的语言模型。它写回答，GSPO 更新的也是它。"], ["论文里", "从 Qwen3-30B-A3B-Base 微调来的冷启动模型，是 MoE 模型。"]]),
+    rew: n("奖励函数", [["是什么", "检查整个回答的规则：答对判 1 分，答错判 0 分。"]]),
+    ref: n("参考模型", [["是什么", "训练开始前策略模型的一份拷贝，不更新。"], ["GSPO 里", "TRL 复现论文的配置里 beta = 0，不加载。"]]),
+    vm: n("价值模型", [["GSPO 里", "不需要。和 GRPO 一样，用同一道题一组回答的平均判分当比较的基准。"]]),
+    ch_seq: n("一个回答只算一个比率", [["改了什么", "GRPO：每个 token 一个比率，各自截断。GSPO：每个回答一个比率，整个回答一起截断。"], ["怎么算", "比率 = e^(这个回答每个 token 的“新 logp − 旧 logp”的平均)。“比率怎么算”那一页逐步算。"], ["截断范围", "论文用 0.9997 到 1.0004。“截断怎么变”那一页逐步算。"]]),
+    row_score: n("判分", [["是什么", "奖励函数给整个回答的分数：答对 1，答错 0。"]]),
+    row_adv: n("优势", [["是什么", "(判分 − 平均) ÷ 标准差，和 GRPO 一样。"]]),
+    row_seq: n("回答的比率", [["是什么", "整个回答一个数，回答里每个 token 都用它。"], ["例子", "1.0002、0.9999、0.9994、1.0006。真实训练里离 1 很近。"]])
+  };
+
+  makeView({ P: "o-", key: "overview", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hot", "这一步讲到的部分"], ["hi", "这一步算出的数"], ["cut", "被截断的数"], ["ghost", "GSPO 不用（或默认不用）的部分"], ["info", "点框或数看说明"]] });
+})();
+
+/* ===== 第 2 页：比率怎么算 ===== */
+(function () {
+  var TX = 250, CW = 112, FX = 830;
+  var Y = [72, 112, 152, 192, 232, 272];
+
+  function draw(A, root, s) {
+    var two = s.ans === 2;
+    var toks = two ? D.tok2 : D.tok1, oldL = two ? D.old2 : D.old1, newL = two ? D.new2 : D.new1, rat = two ? D.ratio2 : D.ratio1;
+    var dl = diffs(oldL, newL), m = mean(dl), sq = Math.exp(m);
+    A.mk("text", { "class": "glabel", x: TX - 8, y: 42, "text-anchor": "end" }, root, two ? "回答 2（优势 −0.5）" : "回答 1（优势 1.5）");
+    tokRow(A, root, TX, 24, CW, toks);
+    var rows = [
+      ["旧 logp", oldL.map(function (v) { return fmt(v, 2); }), "写回答时的策略模型算"],
+      ["新 logp", newL.map(function (v) { return fmt(v, 2); }), "更新几次以后重新算"],
+      ["GRPO：每个 token 的比率", rat.map(function (v) { return fmt(v, 3); }), "= e^(新 logp − 旧 logp)"],
+      ["新 logp − 旧 logp", dl.map(function (v) { return fmt(v, 2); }), ""],
+      ["平均", [fmt(m, 3), "", "", "", ""], "5 个数相加 ÷ 5"],
+      ["GSPO：回答的比率", [fmt(sq, 3), fmt(sq, 3), fmt(sq, 3), fmt(sq, 3), fmt(sq, 3)], "= e^平均，每个 token 一样"]
+    ];
+    rows.forEach(function (r, i) {
+      if (i >= s.rows) return;
+      if (i === 2 && s.skipTok) return;
+      var o = { id: "r_" + i };
+      if (i === s.rows - 1) o.hi = true;
+      if (s.hiRows && s.hiRows.indexOf(i) >= 0) o.hi = true;
+      numRow(A, root, TX, Y[i], CW, r[0], r[1], o);
+      if (r[2]) A.mk("text", { "class": "formula", x: FX, y: Y[i] + 19 }, root, r[2]);
+    });
+    if (s.grad) {
+      A.mk("text", { "class": "gtitle", x: 20, y: 340 }, root, "每个 token 的梯度乘的数（优势相同时）");
+      numRow(A, root, TX, 356, CW, "GRPO", rat.map(function (v, j) { return two && (j === 1 || j === 3) ? "0（截断）" : fmt(v, 3); }), { cut: two ? [1, 3] : [], id: "r_g0" });
+      numRow(A, root, TX, 396, CW, "GSPO", [sq, sq, sq, sq, sq].map(function (v) { return fmt(v, 3) + " × 1/5"; }), { hi: true, id: "r_g1" });
+    }
+  }
+
+  var STEPS = [
+    { rows: 3, hiRows: [2],
+      say: "这一页逐步算 GSPO 的比率，数和 GRPO 页“策略怎么更新”一样（那一页是举例的数，比真实训练离 1 远得多）。先回顾 GRPO：回答 1 的 5 个 token 各有一个比率 e^(新 logp − 旧 logp)：1.284、1.051、1.020、1.041、1.020，每个 token 各自截断。",
+      code: "coef_1 = torch.exp(per_token_logps - old_per_token_logps)   # GRPO：每个 token 一个比率" },
+    { rows: 4, skipTok: true,
+      say: "GSPO 先算每个 token 的“新 logp − 旧 logp”：0.25、0.05、0.02、0.04、0.02。这一步和 GRPO 一样，只是先不取 e 的次方。",
+      code: "log_ratio = per_token_logps - old_per_token_logps" },
+    { rows: 5, skipTok: true,
+      say: "把这 5 个数取平均：(0.25 + 0.05 + 0.02 + 0.04 + 0.02) ÷ 5 = 0.076。除以 5 是按回答长度平均：不然回答越长，加起来的数越大，比率越离谱。",
+      code: "log_importance_weights = (log_ratio * mask).sum(-1) / mask.sum(-1).clamp(min=1.0)   # 0.076" },
+    { rows: 6, skipTok: true,
+      say: "再取 e 的次方：e^0.076 ≈ 1.079，这就是回答 1 的比率，5 个 token 都用它。换一种说法：整个回答的新概率 ÷ 旧概率，再开 5 次方，结果一样（论文写作 s_i(θ)）。",
+      code: "coef_1 = torch.exp(log_importance_weights)   # 形状 (回答数, 1)：每个回答一个数" },
+    { ans: 2, rows: 6, hiRows: [2],
+      say: "回答 2：5 个 token 的“新 logp − 旧 logp”是 0.25、−0.30、−0.05、−0.60、−0.05，平均 −0.15，比率 e^(−0.15) ≈ 0.861。GRPO 里这 5 个 token 的比率差得很远（0.549 到 1.284），“+”和“/”被单独截断、“(42”被单独压低；GSPO 只看 0.861 这一个数，5 个 token 一起处理。",
+      code: "# 回答 2：GRPO 5 个比率 [1.284, 0.741, 0.951, 0.549, 0.951]；GSPO 1 个比率 0.861" },
+    { ans: 2, rows: 6, grad: true,
+      say: "对梯度的影响：GRPO 里每个 token 的梯度乘它自己的比率，没截断的 token 权重各不相同，被截断的 token 是 0。GSPO 里同一个回答的每个 token 都乘同一个比率 0.861，再乘 1/5，每个 token 一样重。",
+      code: "# GRPO：∇logp(token) × 这个 token 的比率\n# GSPO：∇logp(token) × 回答的比率 × 1/回答长度" }
+  ];
+
+  var NOTES = {
+    r_0: n("旧 logp", [["是什么", "写回答时的策略模型给每个 token 的 logp。"]]),
+    r_1: n("新 logp", [["是什么", "更新过程中，当前的策略模型给同一个回答重新算的 logp。"]]),
+    r_2: n("GRPO：每个 token 的比率", [["是什么", "e^(新 logp − 旧 logp)，每个 token 一个，各自截断。"]]),
+    r_3: n("新 logp − 旧 logp", [["是什么", "代码里叫 log_ratio。GSPO 先不取 e 的次方。"]]),
+    r_4: n("平均", [["是什么", "这个回答所有 token 的 log_ratio 相加，除以 token 个数。代码里叫 log_importance_weights。"]]),
+    r_5: n("GSPO：回答的比率", [["是什么", "e^平均 = (整个回答的新概率 ÷ 旧概率) 开“回答长度”次方。论文写作 s_i(θ)。"], ["用在哪", "这个回答的每个 token 都用它，截断也按它来。"]]),
+    r_g0: n("GRPO 的梯度权重", [["是什么", "每个 token 乘自己的比率；比率往有利方向走出 0.8–1.2 的 token 是 0。"]]),
+    r_g1: n("GSPO 的梯度权重", [["是什么", "每个 token 都乘回答的比率和 1/回答长度，同一个回答里一样重。"]])
+  };
+
+  makeView({ P: "r-", key: "ratio", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hi", "这一步算出的数"], ["cut", "被截断的数"], ["info", "点行看说明"]] });
+})();
+
+/* ===== 第 3 页：截断怎么变 ===== */
+(function () {
+  var GX = 230, CW = 104;
+  var Y = [56, 96, 136, 176];
+  function lo(v) { return Math.max(v, 0.9997); }
+  function cl(v) { return Math.min(Math.max(v, 0.9997), 1.0004); }
+
+  function draw(A, root, s) {
+    var k = s.k;
+    colheads(A, root, GX, CW, 40, ["优势", "回答的比率", "比率 × 优势", "截断后 × 优势", "取较小", "这一次"]);
+    for (var i = 0; i < 4; i++) {
+      var a = D.adv[i], r = D.seq[i], s1 = r * a, s2 = cl(r) * a, mn = Math.min(s1, s2), cut = mn !== s1;
+      var v = [fmt(a, 2), k >= 2 ? fmt(r, 4) : "", k >= 2 ? fmt(s1, 5) : "", k >= 3 ? fmt(s2, 5) : "", k >= 3 ? fmt(mn, 5) : "", k >= 3 ? (cut ? "不更新" : (a > 0 ? "推高" : "压低")) : ""];
+      var hc = k === 2 ? [1, 2] : k === 3 ? [3, 4, 5] : (k === 4 && i === 3) ? [1, 4, 5] : [];
+      A.grid(root, GX, Y[i], [v], { rows: ["回答 " + (i + 1)], cw: CW, dig: 2, hiCells: cut && k >= 3 ? [] : hc.map(function (j) { return [0, j]; }), cut: cut && k >= 3 ? [[0, 4], [0, 5]] : [], id: "c_r" + i });
+    }
+    // 截断范围示意
+    var X0 = 160, X1 = 860, lo0 = 0.9990, hi0 = 1.0010;
+    function X(v) { return X0 + (v - lo0) / (hi0 - lo0) * (X1 - X0); }
+    A.mk("text", { "class": "gtitle", x: 20, y: 256 }, root, "回答的比率落在哪");
+    A.mk("rect", { x: X(0.9997), y: 270, width: X(1.0004) - X(0.9997), height: 34, rx: 4, fill: "color-mix(in srgb, var(--accent) 16%, var(--panel))" }, root);
+    A.mk("path", { "class": "axis", d: "M" + X0 + " 304 H" + X1 }, root);
+    [0.9990, 0.9997, 1.0000, 1.0004, 1.0010].forEach(function (t) {
+      A.mk("path", { "class": "guide", d: "M" + X(t) + " 266 V308" }, root);
+      A.mk("text", { "class": "glabel", x: X(t), y: 324, "text-anchor": "middle" }, root, t.toFixed(4));
+    });
+    A.mk("text", { "class": "sub", x: X(1.00035), y: 264, "text-anchor": "middle" }, root, "截断范围 0.9997 到 1.0004");
+    if (k >= 2) D.seq.forEach(function (r, i) {
+      A.mk("circle", { "class": "dot", cx: X(r), cy: 287, r: 6 }, root);
+      A.mk("text", { "class": "sub", x: X(r), y: 346 + (i % 2) * 16, "text-anchor": "middle" }, root, "回答 " + (i + 1));
+    });
+    if (s.cmp) {
+      A.mk("text", { "class": "gtitle", x: 20, y: 400 }, root, "论文实验里的截断范围");
+      numRow(A, root, GX, 412, 2 * CW, "GRPO（每个 token）", ["0.8 到 1.27", "下 0.2，上 0.27"], { id: "c_g" });
+      numRow(A, root, GX, 452, 2 * CW, "GSPO（每个回答）", ["0.9997 到 1.0004", "下 3e-4，上 4e-4"], { hi: true, id: "c_s" });
+    }
+  }
+
+  var STEPS = [
+    { k: 1, cmp: true,
+      say: "这一页看 GSPO 的截断。回答的比率是所有 token 的 log 比率取平均后再取 e 的次方，各个 token 的偏差互相抵消，真实训练里离 1 很近。所以论文把截断范围设得很窄：下限 1 − 0.0003，上限 1 + 0.0004。论文里拿来比较的 GRPO 用的是 0.2 和 0.27。",
+      code: "GRPOConfig(importance_sampling_level=\"sequence\", epsilon=3e-4, epsilon_high=4e-4)" },
+    { k: 2,
+      say: "这一批写完回答后，策略模型按 4 个小批更新（论文把一批回答分成 4 个小批，TRL 里 steps_per_generation = 4）。轮到这组回答时，模型已经更新过，4 个回答的比率是 1.0002、0.9999、0.9994、1.0006，再乘各自的优势。",
+      code: "coef_1 = torch.exp(log_importance_weights)   # [1.0002, 0.9999, 0.9994, 1.0006]" },
+    { k: 3,
+      say: "比率截到 0.9997 到 1.0004 再乘优势，和比率 × 优势取较小。回答 1（优势为正，1.0002）、回答 2（优势为负，0.9999）都在范围里，照常推高、压低。回答 3 优势为负、比率 0.9994 低于 0.9997，取到常数 0.9997 × (−0.5)，整个回答这一次不更新。",
+      code: "coef_2 = torch.clamp(coef_1, 1 - self.epsilon_low, 1 + self.epsilon_high)\nper_token_loss = -torch.min(coef_1 * advantages, coef_2 * advantages)" },
+    { k: 4,
+      say: "回答 4 的比率 1.0006 超过了上限 1.0004，但它的优势为负：比率大于 1 说明它反而变得更常写了，取较小取到的是比率 × 优势 −0.5003，不截断，继续压低。和 GRPO 一样，只有往有利方向走出范围才停。",
+      code: "# 优势 > 0：比率 > 1.0004 时停；优势 < 0：比率 < 0.9997 时停" },
+    { k: 4, cmp: true,
+      say: "和 GRPO 的区别：GRPO 一个回答里可以有的 token 停、有的 token 还在推；GSPO 一停就是整个回答的所有 token。论文统计，GSPO 被截断的 token 比例比 GRPO 高两个数量级，训练效率反而更高：说明 GRPO 那些按 token 算的梯度噪声很大。",
+      code: "# GSPO：coef_1、coef_2 的形状是 (回答数, 1)，截断对整个回答生效" }
+  ];
+
+  var NOTES = {
+    c_r0: n("回答 1", [["算", "优势 1.5，比率 1.0002，在 0.9997 到 1.0004 之间，照常推高。"]]),
+    c_r1: n("回答 2", [["算", "优势 −0.5，比率 0.9999，在范围里，照常压低。"]]),
+    c_r2: n("回答 3", [["算", "优势 −0.5，比率 0.9994 低于 0.9997，取到常数，整个回答这一次不更新。"]]),
+    c_r3: n("回答 4", [["算", "优势 −0.5，比率 1.0006 高于 1.0004；优势为负时上限不截，照常压低。"]]),
+    c_g: n("GRPO 的截断范围", [["是什么", "论文实验里为了公平比较调过的 GRPO：每个 token 的比率限制在 0.8 到 1.27。"]]),
+    c_s: n("GSPO 的截断范围", [["是什么", "每个回答的比率限制在 0.9997 到 1.0004（论文第 5.1 节）。"]])
+  };
+
+  makeView({ P: "c-", key: "clip", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hi", "这一步算出的数"], ["cut", "取到常数、这一次不更新"], ["info", "点行看说明"]] });
+})();
+
+</script>
+<script>
+(function () {
+  var TABS = [{"key": "overview", "p": "o", "title": "GSPO 整体：GSPO 一步训练"}, {"key": "ratio", "p": "r", "title": "GSPO 比率怎么算"}, {"key": "clip", "p": "c", "title": "GSPO 截断怎么变"}], active = TABS[0].key;
+  window.__setHash = function (key, n) {
+    if (key !== active) return;
+    try { history.replaceState(null, "", "#" + key + "-" + n); } catch (e) {}
+  };
+  function activate(key, step) {
+    active = key;
+    TABS.forEach(function (t) {
+      document.getElementById(t.p + "-view").hidden = (t.key !== key);
+      document.getElementById("tab-" + t.key).setAttribute("aria-selected", t.key === key ? "true" : "false");
+      if (t.key === key) document.title = t.title;
+    });
+    var v = window.__v[key];
+    v.show(step === undefined ? v.cur() : step - 1);
+  }
+  TABS.forEach(function (t) {
+    document.getElementById("tab-" + t.key).addEventListener("click", function () { activate(t.key); window.scrollTo(0, 0); });
+  });
+  function fromHash() {
+    var m = /^#([a-z]+)(?:-(\d+))?$/.exec(location.hash);
+    if (m && window.__v[m[1]]) activate(m[1], m[2] ? parseInt(m[2], 10) : undefined);
+    else activate(active);
+  }
+  window.addEventListener("hashchange", fromHash);
+  fromHash();
+})();
+</script>
+</body>
+</html>
