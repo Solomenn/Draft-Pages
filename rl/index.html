@@ -1,0 +1,1336 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>强化学习全貌逐步讲解 (Copy)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #16202b; --muted: #5d6b7a; --line: #c9d1da;
+    --accent: #0b6e8a; --warm: #a8650c; --proc: #e3f1f5; --good: #2f8a4f; --bad: #b42318; --purple: #7b4fb3;
+    --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f151b; --panel: #161e26; --ink: #e6edf3; --muted: #93a1b0; --line: #2c3844;
+      --accent: #4cc0df; --warm: #f0b44c; --proc: #16303a; --good: #62d48a; --bad: #ff7b72; --purple: #b99bf0; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+  .wrap { padding: 24px 16px 40px; }
+  .view { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .view[hidden] { display: none; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0; text-wrap: balance; }
+  .gist { margin: -6px 0 0; font-size: 16px; line-height: 1.7; max-width: 48em; }
+
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  svg.diagram { display: block; width: 100%; height: auto; font-family: var(--font-body); }
+  .colhead { fill: var(--muted); font-size: 13px; font-weight: 500; }
+
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  .title { fill: var(--ink); font-family: var(--font-code); font-size: 13.5px; font-weight: 600; }
+  .titlecn { fill: var(--ink); font-size: 14px; font-weight: 700; }
+  .sub { fill: var(--muted); font-size: 12.5px; }
+  .node { opacity: 0.25; transition: opacity .45s; }
+  .node.on, .node.sel { opacity: 1; }
+  .node.hot .box { stroke: var(--accent); stroke-width: 3; }
+  .node.sel .box { stroke: var(--ink); stroke-width: 3; stroke-dasharray: 7 4; }
+  .node.proc .box { fill: var(--proc); }
+  .clickable { cursor: pointer; outline: none; }
+  .clickable:hover .box { stroke: var(--ink); }
+  .clickable:focus-visible .box { stroke: var(--ink); stroke-width: 3; }
+  .node.ghost .box { fill: none; stroke-dasharray: 6 4; stroke: var(--muted); }
+  .node.ghost .titlecn { fill: var(--muted); }
+  .node.ghost.hot .box { stroke: var(--accent); stroke-width: 2.5; }
+  .sw.ghost { border: 1.5px dashed var(--muted); background: transparent; }
+  .node.env .box { fill: color-mix(in srgb, var(--warm) 13%, var(--panel)); }
+  .subcode { fill: var(--ink); font-family: var(--font-code); font-size: 12.5px; }
+  .sw.proc { background: var(--proc); }
+  .sw.env { background: color-mix(in srgb, var(--warm) 13%, var(--panel)); }
+  .seg { stroke: var(--line); stroke-width: 1; }
+  .stack { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+
+  .info circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; }
+  .info text { fill: var(--muted); font-family: var(--font-code); font-size: 12px; font-weight: 600; }
+  .clickable:hover .info circle, .sel .info circle { fill: var(--ink); stroke: var(--ink); }
+  .clickable:hover .info text, .sel .info text { fill: var(--panel); }
+
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  .link { fill: none; stroke: var(--accent); stroke-width: 2.2; animation: fadein .45s; }
+  .link.back { stroke: var(--muted); stroke-dasharray: 5 4; }
+  .link.warm { stroke: var(--warm); }
+  .linklabel { fill: var(--accent); font-family: var(--font-code); font-size: 12px; font-weight: 600; animation: fadein .45s; }
+  .linklabel.muted { fill: var(--muted); font-family: var(--font-body); font-weight: 500; }
+  .linklabel.warm { fill: var(--warm); }
+
+  .chip rect { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+  .chip text { fill: var(--muted); font-family: var(--font-code); font-size: 13px; }
+  .chip.found rect { fill: var(--accent); stroke: var(--accent); }
+  .chip.found text { fill: #fff; font-weight: 600; }
+  .chip.new rect { fill: var(--warm); stroke: var(--warm); animation: fadein .45s; }
+  .chip.new text { fill: #fff; font-weight: 600; }
+  .chip.empty rect { fill: var(--panel); stroke-dasharray: 4 3; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.found text, :root:not([data-theme="light"]) .chip.new text { fill: #0f151b; } }
+
+  .gtitle { fill: var(--ink); font-size: 13px; font-weight: 700; }
+  .gtitle .code { font-family: var(--font-code); }
+  .glabel { fill: var(--muted); font-size: 12.5px; font-family: var(--font-code); }
+  .cell rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+  .cell .heat { stroke: none; fill: var(--accent); }
+  .cell text { font-family: var(--font-code); font-size: 12px; fill: var(--ink); }
+  .cell.hi rect.bg { fill: color-mix(in srgb, var(--warm) 22%, var(--panel)); stroke: var(--warm); }
+  .cell.dark text { fill: #fff; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cell.dark text { fill: #0f151b; } }
+  .cell.masked rect.bg { fill: var(--line); stroke: var(--line); }
+  .cell.masked text { fill: var(--muted); }
+  .cell.ok rect.bg { fill: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+  .cell.ok text { fill: var(--accent); font-weight: 600; }
+  .sw.ok { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+  .cell.blank rect.bg { fill: var(--panel); stroke-dasharray: 3 3; }
+  .cell.cut rect.bg { fill: color-mix(in srgb, var(--bad) 14%, var(--panel)); stroke: var(--bad); stroke-width: 2; }
+  .cell.cut text { fill: var(--bad); font-weight: 600; }
+  .sw.cut { background: color-mix(in srgb, var(--bad) 14%, var(--panel)); border: 2px solid var(--bad); }
+  .formula { fill: var(--muted); font-size: 12.5px; }
+  .axis { stroke: var(--muted); stroke-width: 1.2; fill: none; }
+  .guide { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 4 4; }
+  .curve { fill: none; stroke: var(--accent); stroke-width: 3; }
+  .curve.flat { stroke: var(--bad); }
+  .dot { fill: var(--warm); }
+  .cell.zero text { fill: var(--muted); opacity: .55; }
+  .gridg { animation: fadein .45s; }
+  .gridg.clickable:hover .gframe { stroke: var(--ink); }
+  .gframe { fill: none; stroke: transparent; stroke-width: 2; }
+  .gridg.hot .gframe { stroke: var(--accent); stroke-width: 2.5; }
+  .region { fill: none; stroke-width: 3; }
+  .region.src { stroke: var(--good); }
+  .region.cross { stroke: var(--warm); }
+  .region.tgt { stroke: var(--purple); }
+  .sw.src { border: 2.5px solid var(--good); background: transparent; }
+  .sw.cross { border: 2.5px solid var(--warm); background: transparent; }
+  .sw.tgt { border: 2.5px solid var(--purple); background: transparent; }
+  .frame { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 2 3; }
+  .divider { stroke: var(--line); stroke-width: 1.5; }
+  .gridg.sel .gframe { stroke: var(--ink); stroke-dasharray: 7 4; }
+  .op { fill: var(--muted); font-family: var(--font-code); font-size: 18px; font-weight: 600; }
+  .bar { fill: var(--line); }
+  .bar.win { fill: var(--accent); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; color: var(--muted); font-size: 13.5px; margin-top: -6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .sw.hot { border: 3px solid var(--accent); background: var(--panel); }
+  .sw.hi { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); border-color: var(--warm); }
+  .sw.heat { background: linear-gradient(90deg, var(--panel), var(--accent)); }
+  .sw.masked { background: var(--line); }
+  .sw.new { background: var(--warm); border-color: var(--warm); }
+  .legend .icon { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--muted); display: inline-grid; place-items: center; font-family: var(--font-code); font-size: 11px; font-weight: 600; }
+
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--ink); border-radius: 14px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .note[hidden] { display: none; }
+  .note-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .note-title { margin: 0; font-family: var(--font-code); font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+  .note-close { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .note-close:hover { border-color: var(--ink); }
+  .note dl { margin: 0; display: grid; grid-template-columns: 8.5em 1fr; gap: 10px 16px; }
+  .note dt { color: var(--muted); font-size: 14px; padding-top: 1px; }
+  .note dd { margin: 0; font-size: 15px; line-height: 1.7; min-width: 0; }
+  .note dd p { margin: 0; }
+  .sample { margin: 0; font-family: var(--font-code); font-size: 12.5px; line-height: 1.55; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow: auto; }
+  .sample-cap { color: var(--muted); font-size: 13.5px; margin-bottom: 4px !important; }
+
+  .caption { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-height: 140px; display: flex; flex-direction: column; gap: 12px; }
+  .caption .say { margin: 0; font-size: 19px; line-height: 1.65; font-weight: 500; max-width: 42em; text-wrap: pretty; }
+  .caption .code { margin: 0; font-family: var(--font-code); font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+  .nav { display: flex; align-items: center; gap: 14px; }
+  .nav button.arrow-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .nav button.arrow-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .nav button.arrow-btn:disabled { opacity: .35; cursor: default; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .dots { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; justify-content: center; }
+  .dots button { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); background: var(--panel); cursor: pointer; }
+  .dots button.done { background: var(--line); }
+  .dots button.now { background: var(--accent); border-color: var(--accent); transform: scale(1.25); }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; min-width: 3.5em; text-align: right; flex: none; }
+
+  @media (min-width: 700px) {
+    .nav button.arrow-btn { position: fixed; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+    .nav .prev { left: 8px; }
+    .nav .next { right: 8px; }
+    .view { padding-inline: 64px; }
+  }
+  @media (min-width: 1200px) {
+    .view { padding-inline: 0; }
+    .nav .prev { left: calc(50% - 592px); }
+    .nav .next { right: calc(50% - 592px); }
+  }
+  @media (max-width: 640px) { .note dl { grid-template-columns: 1fr; gap: 2px 0; } .note dd { margin-bottom: 8px; } }
+  @media (prefers-reduced-motion: reduce) { .node, .link, .linklabel, .gridg, .chip.new rect { transition: none; animation: none; } }
+
+  .tabs { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 14px 16px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .tab { font-family: var(--font-body); font-size: 14px; padding: 7px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .tab:hover { border-color: var(--accent); }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0f151b; } }
+</style>
+</head>
+<body>
+<nav class="tabs" role="tablist" aria-label="切换页面">
+  <button class="tab" role="tab" id="tab-map" aria-selected="true">全貌</button>
+  <button class="tab" role="tab" id="tab-bandit" aria-selected="false">第 2 章 赌博机</button>
+  <button class="tab" role="tab" id="tab-mdp" aria-selected="false">第 3 章 MDP</button>
+  <button class="tab" role="tab" id="tab-dp" aria-selected="false">第 4 章 动态规划</button>
+  <button class="tab" role="tab" id="tab-mctd" aria-selected="false">第 5–7 章 蒙特卡洛与时序差分</button>
+  <button class="tab" role="tab" id="tab-plan" aria-selected="false">第 8 章 规划</button>
+  <button class="tab" role="tab" id="tab-approx" aria-selected="false">第 9–12 章 函数近似</button>
+  <button class="tab" role="tab" id="tab-pg" aria-selected="false">第 13 章 策略梯度</button>
+  <button class="tab" role="tab" id="tab-deeper" aria-selected="false">第 14–17 章 更深入</button>
+  <button class="tab" role="tab" id="tab-llm" aria-selected="false">书外：语言模型</button>
+</nav>
+<div class="wrap">
+<div class="view" id="m-view">
+  <h1>强化学习全貌：Sutton 和 Barto 的书的地图</h1>
+  <p class="gist">本质上是，全书只解决一个问题：智能体一步一步选动作，让回报的平均值最大；前半本用一张表记每个状态的价值，后半本状态太多，改用带权重的函数去估计价值或直接表示策略。</p>
+  <div class="legend" id="m-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="m-diagram" viewBox="0 0 1000 560" role="group" aria-label="强化学习全貌：Sutton 和 Barto 的书的地图">
+      <defs><marker id="m-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="m-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="m-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="m-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="m-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="m-noteTitle"></h2>
+      <button class="note-close" id="m-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="m-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="m-say"></p>
+    <p class="code" id="m-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="m-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="m-dots"></div>
+    <span class="count" id="m-count"></span>
+    <button class="arrow-btn next" id="m-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="b-view" hidden>
+  <h1>第 2 章 多臂赌博机：探索与利用</h1>
+  <p class="gist">本质上是，智能体对每台机器记一个平均得分，大部分时候拉平均分最高的，偶尔随便拉一台，免得一直错过更好的机器。</p>
+  <div class="legend" id="b-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="b-diagram" viewBox="0 0 1000 480" role="group" aria-label="第 2 章 多臂赌博机：探索与利用">
+      <defs><marker id="b-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="b-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="b-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="b-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="b-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="b-noteTitle"></h2>
+      <button class="note-close" id="b-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="b-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="b-say"></p>
+    <p class="code" id="b-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="b-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="b-dots"></div>
+    <span class="count" id="b-count"></span>
+    <button class="arrow-btn next" id="b-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="p-view" hidden>
+  <h1>第 3 章 有限马尔可夫决策过程：问题本身</h1>
+  <p class="gist">本质上是，机器人在格子之间按概率选左或右，走进终点得分；一个格子的价值等于各个动作的概率乘以“这一步的分 + 打折后的下一个格子的价值”加起来。</p>
+  <div class="legend" id="p-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="p-diagram" viewBox="0 0 1000 460" role="group" aria-label="第 3 章 有限马尔可夫决策过程：问题本身">
+      <defs><marker id="p-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="p-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="p-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="p-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="p-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="p-noteTitle"></h2>
+      <button class="note-close" id="p-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="p-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="p-say"></p>
+    <p class="code" id="p-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="p-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="p-dots"></div>
+    <span class="count" id="p-count"></span>
+    <button class="arrow-btn next" id="p-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="d-view" hidden>
+  <h1>第 4 章 动态规划：知道环境的规则时</h1>
+  <p class="gist">本质上是，知道每一步会走到哪里、得几分，就能把价值一遍一遍地算出来，再让每个格子改选价值更高的动作，来回几次就得到最优策略。</p>
+  <div class="legend" id="d-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="d-diagram" viewBox="0 0 1000 470" role="group" aria-label="第 4 章 动态规划：知道环境的规则时">
+      <defs><marker id="d-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="d-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="d-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="d-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="d-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="d-noteTitle"></h2>
+      <button class="note-close" id="d-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="d-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="d-say"></p>
+    <p class="code" id="d-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="d-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="d-dots"></div>
+    <span class="count" id="d-count"></span>
+    <button class="arrow-btn next" id="d-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="t-view" hidden>
+  <h1>第 5–7 章 蒙特卡洛、时序差分、n 步方法：从经历中学习</h1>
+  <p class="gist">本质上是，不知道环境的规则，就从跑出来的回合里学：蒙特卡洛等回合结束用实际回报改价值，时序差分每走一步就用“这一步的分 + 下一个格子现在的估计”改价值。</p>
+  <div class="legend" id="t-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="t-diagram" viewBox="0 0 1000 400" role="group" aria-label="第 5–7 章 蒙特卡洛、时序差分、n 步方法：从经历中学习">
+      <defs><marker id="t-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="t-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="t-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="t-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="t-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="t-noteTitle"></h2>
+      <button class="note-close" id="t-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="t-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="t-say"></p>
+    <p class="code" id="t-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="t-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="t-dots"></div>
+    <span class="count" id="t-count"></span>
+    <button class="arrow-btn next" id="t-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="n-view" hidden>
+  <h1>第 8 章 规划与学习：把真实经历记下来反复用</h1>
+  <p class="gist">本质上是，智能体把走过的每一步记成环境模型，不走新的路，也能用记下的步一遍一遍地更新，让终点的分更快地传回前面的格子。</p>
+  <div class="legend" id="n-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="n-diagram" viewBox="0 0 1000 420" role="group" aria-label="第 8 章 规划与学习：把真实经历记下来反复用">
+      <defs><marker id="n-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="n-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="n-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="n-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="n-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="n-noteTitle"></h2>
+      <button class="note-close" id="n-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="n-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="n-say"></p>
+    <p class="code" id="n-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="n-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="n-dots"></div>
+    <span class="count" id="n-count"></span>
+    <button class="arrow-btn next" id="n-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="f-view" hidden>
+  <h1>第 9–12 章 函数近似和资格迹：状态太多时</h1>
+  <p class="gist">本质上是，状态多到一张表放不下，就把每个状态算成几个特征，用几个权重去估计所有状态的价值；改一个状态的估计，会连带改到相似的状态。</p>
+  <div class="legend" id="f-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="f-diagram" viewBox="0 0 1000 380" role="group" aria-label="第 9–12 章 函数近似和资格迹：状态太多时">
+      <defs><marker id="f-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="f-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="f-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="f-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="f-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="f-noteTitle"></h2>
+      <button class="note-close" id="f-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="f-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="f-say"></p>
+    <p class="code" id="f-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="f-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="f-dots"></div>
+    <span class="count" id="f-count"></span>
+    <button class="arrow-btn next" id="f-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="g-view" hidden>
+  <h1>第 13 章 策略梯度：直接改选动作的概率</h1>
+  <p class="gist">本质上是，机器人照当前策略跑几个回合，每一步之后实际拿到的比平均多，就把这一步选的动作的概率推高，比平均少就压低。</p>
+  <div class="legend" id="g-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="g-diagram" viewBox="0 0 1000 540" role="group" aria-label="第 13 章 策略梯度：直接改选动作的概率">
+      <defs><marker id="g-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="g-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="g-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="g-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="g-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="g-noteTitle"></h2>
+      <button class="note-close" id="g-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="g-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="g-say"></p>
+    <p class="code" id="g-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="g-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="g-dots"></div>
+    <span class="count" id="g-count"></span>
+    <button class="arrow-btn next" id="g-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="x-view" hidden>
+  <h1>第 14–17 章：心理学、神经科学、应用、前沿</h1>
+  <p class="gist">本质上是，动物学会预计奖励的方式、多巴胺神经元的放电，都和 TD 误差“实际的减去预计的”对得上；强化学习已经用在下棋、游戏、推荐等地方，奖励怎么设计仍是没解决好的问题。</p>
+  <div class="legend" id="x-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="x-diagram" viewBox="0 0 1000 300" role="group" aria-label="第 14–17 章：心理学、神经科学、应用、前沿">
+      <defs><marker id="x-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="x-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="x-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="x-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="x-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="x-noteTitle"></h2>
+      <button class="note-close" id="x-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="x-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="x-say"></p>
+    <p class="code" id="x-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="x-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="x-dots"></div>
+    <span class="count" id="x-count"></span>
+    <button class="arrow-btn next" id="x-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="l-view" hidden>
+  <h1>书外：从走廊到语言模型</h1>
+  <p class="gist">本质上是，语言模型每写一个 token 就是在一个状态下选了一个动作，写完以后的判分就是奖励；回报、价值、优势、actor-critic 都原样搬过去，PPO 和 GRPO 是在第 13 章基础上加的改动。</p>
+  <div class="legend" id="l-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="l-diagram" viewBox="0 0 1000 470" role="group" aria-label="书外：从走廊到语言模型">
+      <defs><marker id="l-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="l-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="l-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="l-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="l-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="l-noteTitle"></h2>
+      <button class="note-close" id="l-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="l-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="l-say"></p>
+    <p class="code" id="l-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="l-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="l-dots"></div>
+    <span class="count" id="l-count"></span>
+    <button class="arrow-btn next" id="l-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</div>
+<script>
+var D = {"V": [0.17, 0.378, 0.67], "hist": [[0.0, 0.0, 0.0], [0.0, 0.0, 0.5], [0.0, 0.225, 0.5], [0.101, 0.225, 0.601], [0.101, 0.316, 0.601], [0.142, 0.316, 0.642], [0.142, 0.353, 0.642], [0.159, 0.353, 0.659]], "Vopt": [0.81, 0.9, 1.0], "Q": {"1,0": 0.0, "1,1": 0.34, "2,0": 0.153, "2,1": 0.603, "3,0": 0.34, "3,1": 1.0}, "EP": [[[2, 1, 0.0, 0.9, 0.522], [3, 1, 1.0, 1.0, 0.33]], [[2, 0, 0.0, 0.0, -0.378], [1, 0, 0.0, 0.0, -0.17]], [[2, 1, 0.0, 0.729, 0.351], [3, 0, 0.0, 0.81, 0.14], [2, 1, 0.0, 0.9, 0.522], [3, 1, 1.0, 1.0, 0.33]], [[2, 0, 0.0, 0.0, -0.378], [1, 1, 0.0, 0.0, -0.17], [2, 0, 0.0, 0.0, -0.378], [1, 0, 0.0, 0.0, -0.17]]], "grad": {"1": 0.0213, "2": 0.3161, "3": 0.065}, "newp": {"1": 0.503, "2": 0.539, "3": 0.508}, "curve": [[0.5, 0.5, 0.5], [0.508, 0.518, 0.521], [0.514, 0.509, 0.603], [0.517, 0.544, 0.609], [0.542, 0.557, 0.619], [0.552, 0.599, 0.627], [0.552, 0.622, 0.642], [0.549, 0.663, 0.648], [0.551, 0.717, 0.68], [0.551, 0.724, 0.684], [0.552, 0.748, 0.704], [0.558, 0.758, 0.733], [0.564, 0.77, 0.751], [0.568, 0.776, 0.755], [0.574, 0.79, 0.756], [0.574, 0.793, 0.76], [0.58, 0.796, 0.766], [0.587, 0.806, 0.788], [0.587, 0.809, 0.79], [0.592, 0.811, 0.791], [0.602, 0.814, 0.794], [0.609, 0.827, 0.797], [0.621, 0.834, 0.832], [0.629, 0.844, 0.846], [0.638, 0.855, 0.846], [0.638, 0.856, 0.846], [0.646, 0.867, 0.847], [0.646, 0.868, 0.847], [0.646, 0.869, 0.847], [0.646, 0.869, 0.848], [0.646, 0.87, 0.85], [0.658, 0.88, 0.857], [0.658, 0.881, 0.859], [0.66, 0.884, 0.861], [0.66, 0.884, 0.869], [0.66, 0.884, 0.869], [0.669, 0.893, 0.87], [0.671, 0.895, 0.87], [0.671, 0.895, 0.87], [0.686, 0.905, 0.884], [0.686, 0.905, 0.884], [0.696, 0.913, 0.886], [0.7, 0.915, 0.893], [0.7, 0.915, 0.893], [0.7, 0.915, 0.895], [0.7, 0.915, 0.895], [0.7, 0.915, 0.895], [0.7, 0.915, 0.897], [0.702, 0.916, 0.899], [0.702, 0.917, 0.899], [0.712, 0.924, 0.899], [0.714, 0.924, 0.91], [0.714, 0.925, 0.91], [0.714, 0.924, 0.913], [0.714, 0.925, 0.913], [0.716, 0.926, 0.914], [0.726, 0.932, 0.915], [0.726, 0.932, 0.916], [0.727, 0.933, 0.919], [0.727, 0.933, 0.92]], "gradG": {"1": 0.0, "2": 0.3161, "3": 0.1487}, "gradA": {"1": 0.0213, "2": 0.3161, "3": 0.065}, "newpG": {"1": 0.5, "2": 0.539, "3": 0.519}, "bandit": [[1, 0, "利用", 1.0, [1.0, 0.0, 0.0]], [2, 0, "利用", 0.0, [0.5, 0.0, 0.0]], [3, 2, "探索", 1.0, [0.5, 0.0, 1.0]], [4, 2, "利用", 0.0, [0.5, 0.0, 0.5]], [5, 2, "利用", 1.0, [0.5, 0.0, 0.667]], [6, 2, "利用", 1.0, [0.5, 0.0, 0.75]], [7, 2, "利用", 1.0, [0.5, 0.0, 0.8]], [8, 2, "利用", 1.0, [0.5, 0.0, 0.833]], [9, 2, "利用", 1.0, [0.5, 0.0, 0.857]], [10, 2, "利用", 1.0, [0.5, 0.0, 0.875]], [11, 2, "利用", 1.0, [0.5, 0.0, 0.889]], [12, 2, "利用", 1.0, [0.5, 0.0, 0.9]]], "bandit_seed": 131, "bcurve": {"0.0": [0.497, 0.577, 0.601, 0.59, 0.617, 0.598, 0.591, 0.596, 0.603, 0.61, 0.606, 0.609, 0.606, 0.61, 0.609, 0.611, 0.596, 0.617, 0.6, 0.612, 0.614, 0.609, 0.606, 0.598, 0.613, 0.609, 0.605, 0.605, 0.602, 0.606, 0.6, 0.598, 0.599, 0.605, 0.604, 0.595, 0.608, 0.593, 0.589, 0.599, 0.614, 0.605, 0.606, 0.614, 0.599, 0.6, 0.612, 0.603, 0.602, 0.59, 0.612, 0.604, 0.612, 0.602, 0.612, 0.61, 0.599, 0.6, 0.62, 0.606, 0.596, 0.606, 0.611, 0.602, 0.595, 0.605, 0.595, 0.601, 0.611, 0.612, 0.603, 0.611, 0.609, 0.606, 0.612, 0.607, 0.601, 0.597, 0.603, 0.603, 0.606, 0.597, 0.605, 0.61, 0.614, 0.605, 0.598, 0.596, 0.604, 0.604, 0.592, 0.61, 0.593, 0.608, 0.599, 0.586, 0.604, 0.602, 0.598, 0.616], "0.1": [0.497, 0.586, 0.651, 0.676, 0.715, 0.718, 0.711, 0.743, 0.741, 0.748, 0.75, 0.757, 0.753, 0.757, 0.766, 0.755, 0.759, 0.763, 0.765, 0.752, 0.759, 0.776, 0.796, 0.763, 0.763, 0.767, 0.776, 0.77, 0.774, 0.781, 0.772, 0.771, 0.774, 0.759, 0.765, 0.774, 0.767, 0.774, 0.778, 0.767, 0.786, 0.768, 0.771, 0.774, 0.771, 0.777, 0.775, 0.77, 0.779, 0.767, 0.767, 0.764, 0.773, 0.768, 0.763, 0.771, 0.779, 0.761, 0.763, 0.776, 0.777, 0.761, 0.779, 0.755, 0.766, 0.776, 0.773, 0.786, 0.774, 0.764, 0.766, 0.763, 0.778, 0.762, 0.759, 0.764, 0.76, 0.772, 0.766, 0.753, 0.768, 0.769, 0.773, 0.772, 0.767, 0.757, 0.77, 0.769, 0.782, 0.777, 0.764, 0.763, 0.765, 0.762, 0.777, 0.768, 0.768, 0.769, 0.763, 0.776]}, "VI": [[0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.9, 1.0], [0.81, 0.9, 1.0], [0.81, 0.9, 1.0]], "MC": [[0.0, 0.45, 0.5], [0.0, 0.225, 0.5], [0.0, 0.688, 0.828], [0.0, 0.172, 0.828]], "TD": [[0.0, 0.0, 0.5], [0.0, 0.0, 0.5], [0.0, 0.271, 0.676], [0.03, 0.095, 0.676]], "dyna": [["真实的一步", "格子 2 选右", 0.0, 0.0], ["真实的一步", "格子 3 选右", 0.0, 0.5], ["规划第 1 遍", "两条记录各重放一次", 0.225, 0.75], ["规划第 2 遍", "两条记录各重放一次", 0.45, 0.875], ["规划第 3 遍", "两条记录各重放一次", 0.619, 0.938], ["规划第 4 遍", "两条记录各重放一次", 0.731, 0.969]], "wls": [-0.094, 0.25], "vls": [0.156, 0.406, 0.656], "w1": [0.1, 0.3], "v1": [0.4, 0.7, 1.0], "lamw": [0.05, 0.0475, 0.0451, 0.0429, 0.0407]};
+var SVGNS = "http://www.w3.org/2000/svg";
+function fmt(v, d) {
+  if (typeof v === "string") return v;
+  if (v === null) return "−∞";
+  d = d === undefined ? 2 : d;
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) return (0).toFixed(d);
+  return (v < 0 ? "−" : "") + Math.abs(v).toFixed(d);
+}
+function vec(row) { return "(" + row.map(fmt).join(", ") + ")"; }
+function col(M, a, b) { return M.map(function (r) { return r.slice(a, b); }); }
+
+/* 一个页面：顶部 h1 和一句话，中间 SVG，点框看说明，下面是这一步的说明和代码，最下面翻页 */
+function makeView(cfg) {
+  var P = cfg.P;
+  var $ = function (id) { return document.getElementById(P + id); };
+  var selected = null, cur = 0;
+
+  function mk(tag, attrs, parent, text) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+  function clickable(g, id) {
+    g.classList.add("clickable");
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button");
+    g.setAttribute("aria-label", cfg.notes[id].title + "，点击查看说明");
+    g.setAttribute("data-id", id);
+    if (id === selected) g.classList.add("sel");
+    g.addEventListener("click", function () { choose(id); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(id); } });
+  }
+  function info(g, cx, cy) {
+    var ic = mk("g", { "class": "info" }, g);
+    mk("circle", { cx: cx, cy: cy, r: 9 }, ic);
+    mk("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, ic, "i");
+  }
+  /* 框：id、x、y、宽、高、标题、小字；s.on 里有它就亮，s.hot 里有它就描蓝边 */
+  function box(root, s, id, x, y, w, h, title, sub, opt) {
+    opt = opt || {};
+    var g = mk("g", { "class": "node" + (s.on.indexOf(id) >= 0 ? " on" : "") + (s.hot.indexOf(id) >= 0 ? " hot" : "") + (opt.proc ? " proc" : "") + (opt.env ? " env" : "") }, root);
+    if (opt.ghost) g.classList.add("ghost");
+    if (opt.stack) {
+      mk("rect", { "class": "stack", x: x + 10, y: y - 10, width: w, height: h, rx: 10 }, g);
+      mk("rect", { "class": "stack", x: x + 5, y: y - 5, width: w, height: h, rx: 10 }, g);
+    }
+    mk("rect", { "class": "box", x: x, y: y, width: w, height: h, rx: 10 }, g);
+    var oneLine = !sub;
+    mk("text", { "class": opt.cn ? "titlecn" : "title", x: x + 14, y: oneLine ? y + h / 2 + 5 : y + 24 }, g, title);
+    if (sub) mk("text", { "class": opt.subCode ? "subcode" : "sub", x: x + 14, y: y + 44 }, g, sub);
+    if (cfg.notes[id]) { info(g, x + w - 18, oneLine ? y + h / 2 : y + 20); clickable(g, id); }
+    return g;
+  }
+  function chip(root, x, y, text, kind) {
+    var w = Math.max(34, text.replace(/[^\x00-\xff]/g, "xx").length * 8 + 18);
+    var g = mk("g", { "class": "chip" + (kind ? " " + kind : "") }, root);
+    mk("rect", { x: x, y: y, width: w, height: 26, rx: 6 }, g);
+    mk("text", { x: x + w / 2, y: y + 18, "text-anchor": "middle" }, g, text);
+    return w;
+  }
+  /* 数字网格：o.rows 行名、o.cols 列名、o.hiRow 跟着看的那一行、o.heat 按数值深浅上色（0–1）、o.zero 把 0 变淡 */
+  function grid(root, x, y, M, o) {
+    o = o || {};
+    var cw = o.cw || 52, ch = 28;
+    var nc = M[0].length, CWS = o.cws || M[0].map(function () { return cw; }), CX = [0];
+    CWS.forEach(function (c, j) { CX.push(CX[j] + c); });
+    function cx_(j) { return x + CX[j]; }
+    var g = mk("g", { "class": "gridg" + (o.hot ? " hot" : "") }, root);
+    var top = y;
+    if (o.title) { mk("text", { "class": "gtitle", x: x, y: y + 13 }, g, o.title); top += 22; }
+    if (o.cols) {
+      o.cols.forEach(function (c, j) { mk("text", { "class": "glabel", x: cx_(j) + CWS[j] / 2, y: top + 12, "text-anchor": "middle" }, g, c); });
+      top += 18;
+    }
+    M.forEach(function (row, i) {
+      if (o.rows) mk("text", { "class": "glabel", x: x - 8, y: top + i * ch + 19, "text-anchor": "end" }, g, o.rows[i]);
+      row.forEach(function (v, j) {
+        var hiCell = (o.hiCells && o.hiCells.some(function (c) { return c[0] === i && c[1] === j; })) || (o.hiRow === i) || (o.hiRows && o.hiRows.indexOf(i) >= 0) || (o.hiCols && o.hiCols.indexOf(j) >= 0) || (o.hiAll);
+        var cls = "cell" + (hiCell ? " hi" : "") + (v === null ? " masked" : "") + (v === "✓" ? " ok" : "") + (v === "" ? " blank" : "") + (o.cut && o.cut.some(function (c) { return c[0] === i && c[1] === j; }) ? " cut" : "") + (o.zero && v === 0 ? " zero" : "") + (o.heat && v !== null && v > 0.55 ? " dark" : "");
+        var cg = mk("g", { "class": cls }, g);
+        mk("rect", { "class": "bg", x: cx_(j), y: top + i * ch, width: CWS[j], height: ch }, cg);
+        if (o.heat && v !== null) mk("rect", { "class": "heat", x: cx_(j) + 1, y: top + i * ch + 1, width: CWS[j] - 2, height: ch - 2, "fill-opacity": Math.min(1, v * 0.95) }, cg);
+        mk("text", { x: cx_(j) + CWS[j] / 2, y: top + i * ch + 18.5, "text-anchor": "middle" }, cg, fmt(v, o.digRows ? o.digRows[i] : o.dig));
+      });
+    });
+    var w = CX[nc], hgt = top - y + M.length * ch;
+    if (o.id) {
+      mk("rect", { "class": "gframe", x: x - (o.rows ? 52 : 6), y: y - 6, width: w + (o.rows ? 58 : 12), height: hgt + 12, rx: 8 }, g);
+      g.insertBefore(g.lastChild, g.firstChild);
+      if (o.title) { var tw = o.title.replace(/[^\x00-\xff]/g, "xx").length * 6.6; info(g, Math.max(x + w - 6, x + tw + 14), y + 9); }
+      clickable(g, o.id);
+    }
+    return { w: w, h: hgt, bottom: y + hgt, right: x + w };
+  }
+  function arrow(root, d, cls) { return mk("path", { "class": "link" + (cls ? " " + cls : ""), d: d, "marker-end": "url(#" + P + (cls === "back" ? "headm" : cls === "warm" ? "headw" : "head") + ")" }, root); }
+  function label(root, x, y, text, cls, anchor) { return mk("text", { "class": "linklabel" + (cls ? " " + cls : ""), x: x, y: y, "text-anchor": anchor || "start" }, root, text); }
+  var api = { mk: mk, box: box, chip: chip, grid: grid, arrow: arrow, label: label };
+
+  function renderNote(id) {
+    var n = cfg.notes[id];
+    $("noteTitle").textContent = n.title;
+    var dl = $("noteRows"); dl.textContent = "";
+    n.rows.forEach(function (row) {
+      var dt = document.createElement("dt"); dt.textContent = row[0];
+      var dd = document.createElement("dd"); var v = row[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else {
+        if (v.cap) { var pc = document.createElement("p"); pc.className = "sample-cap"; pc.textContent = v.cap; dd.appendChild(pc); }
+        var pre = document.createElement("pre"); pre.className = "sample"; pre.textContent = v.pre; dd.appendChild(pre);
+      }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    document.querySelectorAll("#" + P + "diagram [data-id]").forEach(function (g) { g.classList.toggle("sel", g.getAttribute("data-id") === selected); });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+
+  function show(i) {
+    cur = Math.max(0, Math.min(cfg.steps.length - 1, i));
+    var s = cfg.steps[cur];
+    s.on = s.on || []; s.hot = s.hot || [];
+    var root = $("draw"); root.textContent = "";
+    cfg.draw(api, root, s);
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + cfg.steps.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === cfg.steps.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash(cfg.key, cur + 1);
+  }
+  cfg.steps.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 步");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+  var lg = $("legend");
+  cfg.legend.forEach(function (it) {
+    var s = document.createElement("span");
+    var sw = document.createElement("i");
+    if (it[0] === "info") { sw.className = "icon"; sw.textContent = "i"; } else sw.className = "sw " + it[0];
+    s.appendChild(sw); s.appendChild(document.createTextNode(it[1])); lg.appendChild(s);
+  });
+  show(0);
+  window.__v = window.__v || {};
+  window.__v[cfg.key] = { show: show, cur: function () { return cur; } };
+}
+</script>
+<script>
+/* 每页共用：画 5 个格子的走廊 */
+var CELL = ["格子 0", "格子 1", "格子 2", "格子 3", "格子 4"];
+var CELLT = ["格子 0：坑", "格子 1", "格子 2", "格子 3", "格子 4：终点"];
+/* o.robot 机器人在哪个格子；o.vals 每个格子下面写的数（null 不写）；o.p 每个格子选“右”的概率；o.hot 要描边的格子；o.trail 走过的箭头 [[从, 到], ...] */
+function corridor(A, root, x, y, o) {
+  o = o || {};
+  var W = 150, H = 76;
+  for (var i = 0; i < 5; i++) {
+    var cx = x + i * W, term = i === 0 || i === 4;
+    var hot = o.hot && o.hot.indexOf(i) >= 0;
+    A.mk("rect", { x: cx, y: y, width: W - 10, height: H, rx: 10, fill: term ? (i === 4 ? "color-mix(in srgb, var(--good) 16%, var(--panel))" : "var(--line)") : "var(--panel)", stroke: hot ? "var(--accent)" : "var(--line)", "stroke-width": hot ? 3 : 1.5 }, root);
+    A.mk("text", { "class": "titlecn", x: cx + 12, y: y + 22 }, root, CELLT[i]);
+    if (term) {
+      A.mk("text", { "class": "sub", x: cx + 12, y: y + 44 }, root, i === 0 ? "掉进去得 0 分" : "走进去得 1 分");
+      A.mk("text", { "class": "sub", x: cx + 12, y: y + 62 }, root, "回合结束");
+    }
+    if (o.vals && o.vals[i] !== null && o.vals[i] !== undefined) A.mk("text", { "class": "title", x: cx + 12, y: y + 64 }, root, o.valLabel + fmt(o.vals[i], 3));
+    if (o.p && !term) {
+      A.mk("text", { "class": "glabel", x: cx + (W - 10) / 2, y: y + H + 20, "text-anchor": "middle" }, root, "左 " + fmt(1 - o.p[i], 3) + "　右 " + fmt(o.p[i], 3));
+    }
+  }
+  if (o.robot !== undefined) {
+    var rx = x + o.robot * W + (W - 10) - 26;
+    A.mk("circle", { cx: rx, cy: y + 24, r: 12, fill: "var(--warm)" }, root);
+  }
+  (o.trail || []).forEach(function (t, k) {
+    var x1 = x + t[0] * W + (W - 10) / 2, x2 = x + t[1] * W + (W - 10) / 2, yy = y - 12 - (k % 2) * 10;
+    A.arrow(root, "M" + x1 + " " + yy + " H" + (x2 + (x2 > x1 ? -6 : 6)), "warm");
+  });
+  return { W: W, H: H };
+}
+var ACT = ["左", "右"];
+
+/* ===== 第 1 页：全书地图和统一视角 ===== */
+(function () {
+  var B = {   // 章：x, y, 中文名, 英文名
+    c2: [30, 110, "第 2 章", "多臂赌博机", "Multi-armed Bandits"],
+    c3: [215, 110, "第 3 章", "有限马尔可夫决策过程", "Finite Markov Decision Processes"],
+    c4: [400, 40, "第 4 章", "动态规划", "Dynamic Programming"],
+    c5: [400, 110, "第 5 章", "蒙特卡洛方法", "Monte Carlo Methods"],
+    c6: [400, 180, "第 6 章", "时序差分学习", "Temporal-Difference Learning"],
+    c7: [585, 145, "第 7 章", "n 步自举", "n-step Bootstrapping"],
+    c8: [770, 110, "第 8 章", "表格方法的规划与学习", "Planning and Learning with Tabular Methods"],
+    c9: [30, 320, "第 9 章", "同策略预测的近似", "On-policy Prediction with Approximation"],
+    c10: [215, 320, "第 10 章", "同策略控制的近似", "On-policy Control with Approximation"],
+    c11: [400, 320, "第 11 章", "离策略方法的近似", "Off-policy Methods with Approximation"],
+    c12: [585, 320, "第 12 章", "资格迹", "Eligibility Traces"],
+    c13: [770, 320, "第 13 章", "策略梯度方法", "Policy Gradient Methods"],
+    c14: [30, 470, "第 14 章", "心理学", "Psychology"],
+    c15: [270, 470, "第 15 章", "神经科学", "Neuroscience"],
+    c16: [510, 470, "第 16 章", "应用与案例", "Applications and Case Studies"],
+    c17: [750, 470, "第 17 章", "前沿", "Frontiers"]
+  };
+  var W = 175, H = 56;
+
+  function mapView(A, root, s) {
+    var S = { on: Object.keys(B), hot: s.hot || [] };
+    A.mk("text", { "class": "colhead", x: 30, y: 24 }, root, "第一部分：表格方法（状态少，每个状态的价值记在一张表里）");
+    A.mk("text", { "class": "colhead", x: 30, y: 300 }, root, "第二部分：近似方法（状态太多，用带权重的函数估计价值或策略）");
+    A.mk("text", { "class": "colhead", x: 30, y: 450 }, root, "第三部分：更深入");
+    Object.keys(B).forEach(function (k) {
+      var b = B[k], w = +k.slice(1) >= 14 ? 220 : W;
+      A.box(root, S, k, b[0], b[1], w, H, b[2], b[3], { cn: true, proc: s.hot && s.hot.indexOf(k) >= 0 });
+    });
+    function arr(a, b, cls) { A.arrow(root, a, cls); }
+    arr("M" + (30 + W + 2) + " 138 H211");
+    arr("M" + (215 + W + 2) + " 130 H380 V68 H396"); arr("M" + (215 + W + 2) + " 138 H396"); arr("M" + (215 + W + 2) + " 146 H380 V208 H396");
+    arr("M" + (400 + W + 2) + " 138 H570 V163 H581"); arr("M" + (400 + W + 2) + " 208 H570 V181 H581");
+    arr("M" + (400 + W + 2) + " 68 H750 V126 H766"); arr("M" + (585 + W + 2) + " 173 H750 V150 H766");
+    [9, 10, 11, 12].forEach(function (c) { var b = B["c" + c]; arr("M" + (b[0] + W + 2) + " 348 H" + (B["c" + (c + 1)][0] - 4)); });
+    A.arrow(root, "M120 168 V316", "warm");
+    A.label(root, 128, 250, "状态太多，表放不下", "warm");
+  }
+
+  function unified(A, root, s) {
+    var x0 = 260, y0 = 70, w = 520, h = 380;
+    A.mk("rect", { x: x0, y: y0, width: w, height: h, fill: "none", stroke: "var(--line)", "stroke-width": 1.5 }, root);
+    A.mk("text", { "class": "gtitle", x: x0 + w / 2, y: y0 + h + 34, "text-anchor": "middle" }, root, "更新的宽度：采样更新（只看实际发生的一种结果） ←→ 期望更新（把每种可能的结果按概率都算进来）");
+    A.mk("text", { "class": "gtitle", x: x0 - 16, y: y0 + 14, "text-anchor": "end" }, root, "一步：用下一个状态");
+    A.mk("text", { "class": "gtitle", x: x0 - 16, y: y0 + 32, "text-anchor": "end" }, root, "现在的价值估计");
+    A.mk("text", { "class": "gtitle", x: x0 - 16, y: y0 + h - 14, "text-anchor": "end" }, root, "完整：一直用到");
+    A.mk("text", { "class": "gtitle", x: x0 - 16, y: y0 + h + 4, "text-anchor": "end" }, root, "回合结束的奖励");
+    A.mk("text", { "class": "sub", x: x0 - 16, y: y0 + h / 2, "text-anchor": "end" }, root, "更新的深度 ↕");
+    var C = [
+      ["c6", x0 + 20, y0 + 20, "时序差分", "第 6 章：采样 + 一步"],
+      ["c4", x0 + w - 220, y0 + 20, "动态规划", "第 4 章：期望 + 一步"],
+      ["c5", x0 + 20, y0 + h - 76, "蒙特卡洛", "第 5 章：采样 + 完整"],
+      ["ex", x0 + w - 220, y0 + h - 76, "穷举搜索", "期望 + 完整：代价太大"]
+    ];
+    var S = { on: ["c6", "c4", "c5", "ex", "c7"], hot: s.hot || [] };
+    C.forEach(function (c) { A.box(root, S, c[0], c[1], c[2], 200, 56, c[3], c[4], { cn: true, proc: c[0] !== "ex" }); });
+    A.box(root, S, "c7", x0 + 20, y0 + h / 2 - 28, 200, 56, "n 步方法、资格迹", "第 7、12 章：深度在两者之间", { cn: true });
+  }
+
+  function draw(A, root, s) { if (s.uni) unified(A, root, s); else mapView(A, root, s); }
+
+  var STEPS = [
+    { hot: ["c3"],
+      say: "这一页是 Sutton 和 Barto 的《Reinforcement Learning: An Introduction》（第 2 版）的全书地图。全书讨论的是同一个问题，写在第 3 章：智能体在环境里一步一步选动作，环境返回下一个状态和奖励，智能体要找一个策略，让回报的平均值最大。这个问题的数学写法叫有限马尔可夫决策过程（MDP）。“MDP”那一页用 5 个格子的走廊把这些概念逐个算一遍。",
+      code: "循环：状态 S_t → 智能体选动作 A_t → 环境返回奖励 R_(t+1) 和下一个状态 S_(t+1)" },
+    { hot: ["c2"],
+      say: "第 2 章先讲最简单的情况：只有一个状态，智能体每次从几台机器里选一台，拿到一个奖励，没有“下一个状态”。它只用来讲一件事：智能体要在“选目前看起来最好的”（利用）和“试一试别的”（探索）之间取舍。这个取舍在全书每一种方法里都存在。",
+      code: "一个状态，k 个动作，每次选一个，拿一个奖励" },
+    { hot: ["c4", "c5", "c6"],
+      say: "第 4 到第 6 章是三类基本方法，它们都在估计价值，区别在于用什么信息。动态规划（第 4 章）事先知道环境的规则，直接把每种结果按概率算进来；蒙特卡洛方法（第 5 章）不知道规则，跑完一整个回合，用实际拿到的回报来估计；时序差分学习（第 6 章）也不知道规则，每走一步就用“这一步的奖励 + 下一个状态现在的价值估计”来更新，不用等回合结束。",
+      code: "动态规划：知道环境的规则\n蒙特卡洛：等回合结束，用实际回报\n时序差分：每走一步，用奖励 + 下一个状态的价值估计" },
+    { hot: ["c7", "c8"],
+      say: "第 7、8 章把三类方法连起来。第 7 章的 n 步方法往后看 n 步再用价值估计：n = 1 就是时序差分，n 一直到回合结束就是蒙特卡洛。第 8 章讲规划：智能体把真实经历记成一个环境模型，再用这个模型生成更多的更新，把动态规划和从经历中学习放在一起。",
+      code: "n = 1：时序差分；n = 回合剩下的步数：蒙特卡洛" },
+    { hot: ["c9", "c10", "c11", "c12", "c13"],
+      say: "第一部分的方法都把每个状态的价值记在一张表里。状态一多（例如围棋的棋盘、语言模型的“题目 + 已写出的 token”），表就放不下了。第二部分用带权重的函数（例如神经网络）去估计价值：第 9、10 章讲同策略的预测和控制，第 11 章讲离策略时会出的问题，第 12 章的资格迹把 n 步方法做成一个可调的参数 λ，第 13 章直接用带权重的函数表示策略，按梯度改策略。",
+      code: "表格：V[s]   →   近似：v̂(s, w)，w 是权重" },
+    { hot: ["c14", "c15", "c16", "c17"],
+      say: "第三部分不讲新算法：第 14、15 章把强化学习和动物学习、多巴胺神经元的研究对照起来；第 16 章讲 TD-Gammon、Atari、AlphaGo 等 8 个案例；第 17 章讲还在发展的方向。“第 14–17 章”那一页逐章讲。",
+      code: "# 第 14–17 章：心理学、神经科学、应用与案例、前沿" },
+    { uni: true, hot: ["c6", "c4", "c5", "ex"],
+      say: "书里第 8 章末尾用两个维度把第一部分的方法放在同一张图上。横向是更新的宽度：采样更新只用实际发生的那一种结果，期望更新把每种可能的结果按概率都算进来。纵向是更新的深度：一步更新用下一个状态现在的价值估计，完整更新一直用到回合结束的奖励。四个角分别是时序差分、动态规划、蒙特卡洛和穷举搜索。",
+      code: "宽度：采样 ←→ 期望\n深度：一步（自举） ←→ 完整回报" },
+    { uni: true, hot: ["c7"],
+      say: "用下一个状态现在的价值估计来更新，叫自举（bootstrapping）。时序差分和动态规划都自举，蒙特卡洛不自举。第 7 章的 n 步方法和第 12 章的资格迹都在纵向的中间：往后看几步真实奖励，再自举。PPO 里的 GAE 用 λ = 0.95 做的就是这件事，“函数近似”那一页会把它和资格迹对上。",
+      code: "n 步回报：R_(t+1) + γR_(t+2) + … + γ^(n−1) R_(t+n) + γ^n V(S_(t+n))" }
+  ];
+
+  function n(k) { var b = B[k]; return { title: b[2] + " " + b[3] + "（" + b[4] + "）", rows: [["在书里", "第" + (+k.slice(1) <= 8 ? "一" : +k.slice(1) <= 13 ? "二" : "三") + "部分。"]] }; }
+  var NOTES = {}; Object.keys(B).forEach(function (k) { NOTES[k] = n(k); });
+  NOTES.c2.rows.push(["讲什么", "只有一个状态时的探索与利用：ε-贪心、UCB、乐观初始值、梯度赌博机。"]);
+  NOTES.c3.rows.push(["讲什么", "智能体与环境的交互、回报、折扣、价值、动作价值、贝尔曼方程、最优策略。"]);
+  NOTES.c4.rows.push(["讲什么", "策略评估、策略改进、策略迭代、价值迭代、广义策略迭代。前提是知道环境的规则。"]);
+  NOTES.c5.rows.push(["讲什么", "用完整回合的实际回报估计价值；同策略与离策略的蒙特卡洛控制；重要性采样。"]);
+  NOTES.c6.rows.push(["讲什么", "TD(0)、Sarsa、Q-learning、期望 Sarsa、双重学习。"]);
+  NOTES.c7.rows.push(["讲什么", "n 步 TD、n 步 Sarsa、n 步离策略方法。"]);
+  NOTES.c8.rows.push(["讲什么", "环境模型、Dyna、优先扫描、蒙特卡洛树搜索，以及第一部分的总结图（两个维度）。"]);
+  NOTES.c9.rows.push(["讲什么", "用带权重的函数估计价值：随机梯度、半梯度 TD、线性方法、特征构造、神经网络。"]);
+  NOTES.c10.rows.push(["讲什么", "用近似的动作价值做控制：半梯度 Sarsa、平均奖励。"]);
+  NOTES.c11.rows.push(["讲什么", "离策略加函数近似为什么会出问题：致命三要素（函数近似、自举、离策略训练）。"]);
+  NOTES.c12.rows.push(["讲什么", "λ-回报、TD(λ)、资格迹：把各种 n 步回报按 λ 加权平均。"]);
+  NOTES.c13.rows.push(["讲什么", "策略梯度定理、REINFORCE、带基线的 REINFORCE、actor-critic。"]);
+  NOTES.c14.rows.push(["讲什么", "经典条件反射、工具性条件反射、Rescorla–Wagner 模型、条件反射的 TD 模型。"]);
+  NOTES.c15.rows.push(["讲什么", "多巴胺的奖励预测误差假说、大脑里的 actor-critic。"]);
+  NOTES.c16.rows.push(["讲什么", "TD-Gammon、Samuel 的跳棋程序、Watson 下注、内存控制、Atari（DQN）、围棋（AlphaGo）、个性化网页服务、热气流滑翔。"]);
+  NOTES.c17.rows.push(["讲什么", "广义价值函数、选项、观测和状态、设计奖励信号、剩下的问题、强化学习和人工智能的未来。"]);
+  NOTES.ex = { title: "穷举搜索", rows: [["是什么", "把所有可能的后续一直展开到回合结束，按概率全部算进来。代价随步数指数增长，实际上做不到。"]] };
+
+  makeView({ P: "m-", key: "map", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hot", "这一步讲到的章"], ["info", "点框看这一章讲什么"]] });
+})();
+
+/* ===== 第 2 页：多臂赌博机（第 2 章） ===== */
+(function () {
+  var MEANS = [0.2, 0.5, 0.8];
+  function machines(A, root, s) {
+    for (var i = 0; i < 3; i++) {
+      var x = 180 + i * 230, hot = s.hotM === i;
+      A.mk("rect", { x: x, y: 20, width: 200, height: 70, rx: 10, fill: "var(--proc)", stroke: hot ? "var(--accent)" : "var(--line)", "stroke-width": hot ? 3 : 1.5 }, root);
+      A.mk("text", { "class": "titlecn", x: x + 14, y: 46 }, root, "机器 " + (i + 1));
+      A.mk("text", { "class": "sub", x: x + 14, y: 70 }, root, s.reveal ? "真实的得 1 分概率：" + MEANS[i] : "得 1 分的概率：不知道");
+    }
+  }
+  function draw(A, root, s) {
+    machines(A, root, s);
+    if (s.rows) {
+      var M = D.bandit.slice(0, s.rows).map(function (l) {
+        var row = ["机器 " + (l[1] + 1), s.why ? l[2] : "", String(l[3])];
+        return row.concat(l[4].map(function (v) { return fmt(v, 3); }));
+      });
+      A.grid(root, 260, 110, M, { rows: D.bandit.slice(0, s.rows).map(function (l) { return "第 " + l[0] + " 次"; }), cols: ["选哪台", "为什么", "奖励", "Q(机器 1)", "Q(机器 2)", "Q(机器 3)"], cw: 100, hiRow: s.hi });
+    }
+    if (s.curve) {
+      var cx = 220, cy = 130, w = 600, h = 300;
+      A.mk("text", { "class": "gtitle", x: cx - 40, y: cy - 12 }, root, "400 次重复实验的平均：每一步拿到的奖励（每 10 步取平均）");
+      A.mk("path", { "class": "axis", d: "M" + cx + " " + cy + " V" + (cy + h) + " H" + (cx + w) }, root);
+      function Y(v) { return cy + h - (v - 0.4) / 0.5 * h; }
+      [0.5, 0.6, 0.7, 0.8].forEach(function (v) {
+        A.mk("path", { "class": "guide", d: "M" + cx + " " + Y(v) + " H" + (cx + w) }, root);
+        A.mk("text", { "class": "glabel", x: cx - 8, y: Y(v) + 4, "text-anchor": "end" }, root, v.toFixed(1));
+      });
+      [["0.0", "var(--muted)", "贪心"], ["0.1", "var(--accent)", "ε-贪心"]].forEach(function (c) {
+        var arr = D.bcurve[c[0]];
+        A.mk("path", { d: arr.map(function (v, i) { return (i ? "L" : "M") + (cx + i / (arr.length - 1) * w) + " " + Y(v); }).join(" "), fill: "none", stroke: c[1], "stroke-width": 2.5 }, root);
+        A.mk("text", { "class": "glabel", x: cx + w + 8, y: Y(arr[arr.length - 1]) + 4 }, root, c[2] + " " + arr[arr.length - 1].toFixed(2));
+      });
+      A.mk("text", { "class": "glabel", x: cx + w, y: cy + h + 18, "text-anchor": "end" }, root, "第 1 到 1000 次 →");
+    }
+  }
+
+  var STEPS = [
+    { reveal: false,
+      say: "第 2 章讲最简单的情况：智能体面前有 3 台机器，每次选一台拉一下，这台机器按自己的概率给 1 分或 0 分。智能体不知道这些概率，只能从自己拉过的结果里慢慢估计。这里只有一个状态，选完也不会走到别的状态，所以这一页只讲一件事：怎样在估计还不准的时候选机器。",
+      code: "for t in range(1000):\n    a = 选一台机器()\n    r = 拉(a)   # 1 或 0" },
+    { reveal: false, rows: 2, hi: 1,
+      say: "智能体给每台机器记一个估计值 Q：这台机器到目前为止拿到的奖励的平均数。不用存下全部历史，每次只要把 Q 往这次的奖励挪一点：Q ← Q + (奖励 − Q) ÷ 这台机器被拉的次数。第 1 次拉机器 1 得了 1 分，Q(机器 1) = 1；第 2 次又拉机器 1 得 0 分，Q = 1 + (0 − 1) ÷ 2 = 0.5。",
+      code: "N[a] += 1\nQ[a] += (r - Q[a]) / N[a]   # 增量地算平均数" },
+    { reveal: false, rows: 3, why: true, hi: 2, hotM: 2,
+      say: "如果每次都选 Q 最大的机器，叫贪心。第 2 次以后 Q(机器 1) = 0.5，另外两台还是 0，只要 Q(机器 1) 大于 0，贪心就会一直拉机器 1，永远不会知道机器 3 更好。ε-贪心的做法是：大部分时候选 Q 最大的（利用），以 ε = 0.1 的概率随便选一台（探索）。第 3 次正好抽到了探索，选中机器 3，得了 1 分。",
+      code: "if random() < 0.1:\n    a = 随便选一台()     # 探索\nelse:\n    a = argmax(Q)       # 利用" },
+    { reveal: true, rows: 12, why: true, hi: 11, hotM: 2,
+      say: "机器 3 的 Q 变成 1 以后，利用也会选它。到第 12 次，Q(机器 3) = 0.9，已经接近它真实的 0.8。现在揭晓三台机器真实的概率：0.2、0.5、0.8。机器 2 一次都没被拉过，它的 Q 还是 0；只要 ε 大于 0，以后它也会偶尔被试到。",
+      code: "# 第 12 次以后：Q = [0.5, 0, 0.9]" },
+    { reveal: true, curve: true,
+      say: "把整个实验重复 400 次、每次拉 1000 下，再平均。贪心常常一开始就锁在一台不好的机器上，平均每次只拿到 " + D.bcurve["0.0"][D.bcurve["0.0"].length - 1].toFixed(2) + " 分；ε-贪心花一点次数去探索，平均拿到 " + D.bcurve["0.1"][D.bcurve["0.1"].length - 1].toFixed(2) + " 分，接近最好的 0.8。第 2 章还讲了 UCB（优先试被拉得少的机器）、乐观初始值和梯度赌博机，它们都是在回答同一个问题：探索多少、怎么探索。",
+      code: "# 每 1000 次的平均奖励：贪心 " + D.bcurve["0.0"][D.bcurve["0.0"].length - 1].toFixed(2) + "，ε-贪心 " + D.bcurve["0.1"][D.bcurve["0.1"].length - 1].toFixed(2) }
+  ];
+
+  makeView({ P: "b-", key: "bandit", steps: STEPS, notes: {}, draw: draw,
+    legend: [["hot", "这一步选中的机器"], ["hi", "这一步那一行"]] });
+})();
+
+/* ===== 第 3 页：有限马尔可夫决策过程（第 3 章） ===== */
+(function () {
+  var X = 125, Y = 60;
+  var HALF = { 1: 0.5, 2: 0.5, 3: 0.5 }, ALLR = { 1: 1, 2: 1, 3: 1 };
+  var T1 = [[2, "右", 3, 0], [3, "右", 4, 1]];
+  var V = [null, D.V[0], D.V[1], D.V[2], null], VO = [null, D.Vopt[0], D.Vopt[1], D.Vopt[2], null];
+  function q(s, a) { return D.Q[s + "," + a]; }
+
+  function draw(A, root, s) {
+    corridor(A, root, X, Y, { robot: s.robot, p: s.p === "opt" ? ALLR : s.p ? HALF : null, trail: s.trail, hot: s.hot, vals: s.vals, valLabel: s.valLabel || "V = " });
+    var y = 220;
+    if (s.t) {
+      var rows = T1.slice(0, s.n);
+      A.grid(root, X + 70, y, rows.map(function (r, i) { return ["第 " + (i + 1) + " 步", CELL[r[0]], r[1], CELL[r[2]], String(r[3])]; }), { title: "轨迹：每一步的状态、动作、奖励", cols: ["", "状态", "动作", "下一个状态", "奖励"], cw: 120, hiRow: rows.length - 1 });
+      if (s.G) A.mk("text", { "class": "titlecn", x: X + 70, y: y + 40 + rows.length * 28 + 26 }, root, s.G);
+    }
+    if (s.bell) {
+      var v2 = D.V[1], B = [["0.5", "1", "格子 4（终点）", "0", "0.500"], ["0.5", "0", "格子 2", fmt(0.9 * v2, 3), fmt(0.45 * v2, 3)]];
+      A.grid(root, X + 40, y, B, { title: "V(格子 3) = 两行最后一列加起来 = 0.500 + " + fmt(0.45 * v2, 3) + " = " + fmt(D.V[2], 3), rows: ["向右", "向左"], cols: ["动作的概率", "这一步的奖励", "到哪个格子", "0.9 × 那个格子的价值", "概率 × (奖励 + 前一列)"], cw: 150, hiCols: [4] });
+    }
+    if (s.qtab) {
+      var Q = [1, 2, 3].map(function (c) { return [fmt(q(c, 0), 3), fmt(q(c, 1), 3)]; });
+      A.grid(root, X + 160, y, Q, { title: "Q：先选这个动作，之后照一半左、一半右走，平均能拿多少", rows: ["格子 1", "格子 2", "格子 3"], cols: ["Q(·, 左)", "Q(·, 右)"], cw: 140, hiRow: 1 });
+    }
+  }
+
+  var STEPS = [
+    { robot: 2,
+      say: "第 3 章把强化学习的问题写清楚。这里用一条 5 个格子的走廊当环境，智能体是一个机器人，从格子 2 出发（橙色圆点）。格子 0 是坑，掉进去得 0 分，回合结束；格子 4 是终点，走进去得 1 分，回合结束。从出发到结束的一整段叫一个回合。机器人在哪个格子，叫状态；每一步可选的动作是“左”和“右”。",
+      code: "状态：格子 1、2、3（格子 0 和 4 是回合结束的状态）\n动作：左、右" },
+    { robot: 2, p: true,
+      say: "策略规定在每个状态下选每个动作的概率，记作 π(动作 | 状态)。一开始机器人什么都不知道，在格子 1、2、3 上都是一半概率向左、一半概率向右。全书所有方法要做的事，都是找到更好的策略。",
+      code: "π(左 | 格子 2) = 0.5，π(右 | 格子 2) = 0.5" },
+    { robot: 4, p: true, trail: [[2, 3], [3, 4]], t: true, n: 2,
+      say: "机器人按策略走：在格子 2 抽到“右”，环境把它移到格子 3，这一步的奖励是 0；在格子 3 又抽到“右”，走进终点，这一步的奖励是 1，回合结束。环境每一步返回两样东西：下一个状态和这一步的奖励。下一个状态只取决于现在的状态和动作，和更早走过哪些格子无关，这个性质叫马尔可夫性质。",
+      code: "S_0 = 格子 2, A_0 = 右, R_1 = 0, S_1 = 格子 3, A_1 = 右, R_2 = 1, 回合结束" },
+    { robot: 4, p: true, trail: [[2, 3], [3, 4]], t: true, n: 2, G: "回报 G = 0 + 0.9 × 1 = 0.9",
+      say: "回报是一个回合里拿到的奖励按时间打折加起来：第 1 步的奖励乘 1，第 2 步的乘 0.9，第 3 步的乘 0.9²……0.9 叫折扣因子 γ。这条轨迹的回报是 0 + 0.9 × 1 = 0.9。打折的意思是：同样得 1 分，早得到比晚得到好。同一个策略每个回合走法不同，回报也不同，所以要比较的是回报的平均值。",
+      code: "G_t = R_(t+1) + γ R_(t+2) + γ² R_(t+3) + …   # γ = 0.9" },
+    { p: true, vals: V, hot: [1, 2, 3],
+      say: "状态的价值 V_π(s) 是：从状态 s 出发、照策略 π 走，回报的平均值。照一半左、一半右走，格子 1、2、3 的价值分别是 " + D.V.map(function (v) { return fmt(v, 3); }).join("、") + "：离终点越近，价值越高。“动态规划”那一页说明这些数怎么算出来。",
+      code: "V_π(s) = E_π[G_t | S_t = s]" },
+    { p: true, bell: true, vals: [null, null, null, null, null], hot: [3],
+      say: "价值满足一个式子：一个状态的价值 = 每个动作的概率 ×（这一步的奖励 + γ × 下一个状态的价值），再加起来。例如格子 3：一半概率向右，得 1 分，回合结束；一半概率向左，得 0 分，到格子 2。所以 V(格子 3) = 0.5 × (1 + 0) + 0.5 × (0 + 0.9 × V(格子 2)) = 0.5 + 0.45 × " + fmt(D.V[1], 3) + " = " + fmt(D.V[2], 3) + "。这个式子叫贝尔曼方程，它把一个状态的价值和下一个状态的价值连在一起。",
+      code: "V_π(s) = Σ_a π(a|s) × (r + γ V_π(s'))   # 回合结束的状态价值记 0" },
+    { p: true, vals: V, qtab: true, hot: [2],
+      say: "动作价值 Q_π(s, a) 是：在状态 s 先选动作 a，之后照策略 π 走，回报的平均值。在格子 2 向右：Q = 0 + 0.9 × V(格子 3) = " + fmt(q(2, 1), 3) + "；向左：Q = 0 + 0.9 × V(格子 1) = " + fmt(q(2, 0), 3) + "。比较同一个状态下各个动作的 Q，就知道哪个动作更好。",
+      code: "Q_π(s, a) = r + γ V_π(s')" },
+    { p: "opt", vals: VO, valLabel: "V* = ", hot: [1, 2, 3],
+      say: "最优策略是让每个状态的价值都最大的策略，它的价值记作 V*。V* 满足贝尔曼最优方程：一个状态的最优价值 = 在所有动作里，取（这一步的奖励 + γ × 下一个状态的最优价值）最大的那个。走廊里最优策略是一直向右，V* = 0.81、0.9、1。全书的方法，都是在用不同的办法去逼近 V*、Q* 或最优策略。",
+      code: "V*(s) = max_a (r + γ V*(s'))" }
+  ];
+
+  makeView({ P: "p-", key: "mdp", steps: STEPS, notes: {}, draw: draw,
+    legend: [["new", "橙色圆点：机器人的位置"], ["hot", "这一步讲到的格子"], ["hi", "这一步那一行"]] });
+})();
+
+/* ===== 第 4 页：动态规划（第 4 章） ===== */
+(function () {
+  var X = 125, Y = 30;
+  var HALF = { 1: 0.5, 2: 0.5, 3: 0.5 }, ALLR = { 1: 1, 2: 1, 3: 1 };
+  function q(s, a) { return D.Q[s + "," + a]; }
+
+  function draw(A, root, s) {
+    corridor(A, root, X, Y, { p: s.opt ? ALLR : HALF, vals: s.vals, valLabel: s.valLabel || "V = ", hot: s.hot });
+    var y = 170, gx = X + 160;
+    if (s.model) {
+      var M = [1, 2, 3].map(function (c) { return [CELL[c - 1] + "，0 分", CELL[c + 1] + "，" + (c + 1 === 4 ? "1" : "0") + " 分"]; });
+      A.grid(root, gx, y, M, { title: "环境的规则：在这个格子选这个动作，会到哪里、得几分", rows: ["格子 1", "格子 2", "格子 3"], cols: ["选“左”", "选“右”"], cw: 170 });
+    }
+    if (s.iter) {
+      var H = D.hist.map(function (h) { return h.map(function (v) { return fmt(v, 3); }); });
+      A.grid(root, gx, y, H, { title: "策略评估：从全是 0 开始，用贝尔曼方程一遍一遍地算", rows: D.hist.map(function (_, k) { return "第 " + k + " 遍"; }), cols: ["V(格子 1)", "V(格子 2)", "V(格子 3)"], cw: 130, hiRow: D.hist.length - 1 });
+      A.mk("text", { "class": "sub", x: gx, y: y + 40 + D.hist.length * 28 + 22 }, root, "一直算下去，停在 " + D.V.map(function (v) { return fmt(v, 3); }).join("、"));
+    }
+    if (s.qtab) {
+      var Q = [1, 2, 3].map(function (c) { return [fmt(q(c, 0), 3), fmt(q(c, 1), 3), q(c, 1) > q(c, 0) ? "右" : "左"]; });
+      A.grid(root, gx, y, Q, { title: "策略改进：用上面算出的价值算 Q，每个格子改选 Q 大的动作", rows: ["格子 1", "格子 2", "格子 3"], cols: ["Q(·, 左)", "Q(·, 右)", "新策略选"], cw: 130, hiCols: [2] });
+    }
+    if (s.pi) {
+      var P = [["一半左、一半右", D.V.map(function (v) { return fmt(v, 3); }).join("、"), "三个格子都改成“右”"], ["一直向右", D.Vopt.map(function (v) { return fmt(v, 3); }).join("、"), "三个格子都还是“右”：不再变"]];
+      A.grid(root, X, y, P, { title: "策略迭代：评估 → 改进 → 评估 → 改进，直到策略不再变", rows: ["第 1 轮", "第 2 轮"], cols: ["评估的策略", "评估出的价值", "改进以后"], cw: 230, hiRow: 1 });
+    }
+    if (s.vi) {
+      var VI = D.VI.map(function (h) { return h.map(function (v) { return fmt(v, 3); }); });
+      A.grid(root, gx, y, VI, { title: "价值迭代：每一遍直接取最大的那个动作", rows: D.VI.map(function (_, k) { return "第 " + k + " 遍"; }), cols: ["V(格子 1)", "V(格子 2)", "V(格子 3)"], cw: 130, hiRow: 3 });
+    }
+    if (s.gpi) {
+      var cx = 500, cy = 300;
+      A.box(root, { on: ["e", "i"], hot: [] }, "e", cx - 330, cy - 40, 260, 70, "策略评估", "照现在的策略算价值", { cn: true, proc: true });
+      A.box(root, { on: ["e", "i"], hot: [] }, "i", cx + 70, cy - 40, 260, 70, "策略改进", "照现在的价值选更好的动作", { cn: true, proc: true });
+      A.arrow(root, "M" + (cx - 68) + " " + (cy - 20) + " H" + (cx + 66));
+      A.arrow(root, "M" + (cx + 68) + " " + (cy + 14) + " H" + (cx - 66), "warm");
+      A.label(root, cx, cy - 28, "价值", "", "middle");
+      A.label(root, cx, cy + 36, "策略", "warm", "middle");
+    }
+  }
+
+  var STEPS = [
+    { model: true,
+      say: "动态规划有一个前提：智能体事先知道环境的规则，也就是在每个格子选每个动作，会走到哪个格子、得几分。走廊的规则写在表里。有了规则，智能体不用真的去走，就能把每种结果按概率算进来。",
+      code: "p(s', r | s, a)   # 环境的规则：在 s 选 a，到 s'、得 r 的概率" },
+    { iter: true,
+      say: "第一件事是策略评估：给定一个策略，算出每个状态的价值。做法是先把价值都当成 0，把它们代进“MDP”那一页的贝尔曼方程，算出新的一遍，再把新的一遍代进去，一遍一遍地算。第 1 遍只有格子 3 能直接走进终点，变成 0.5；第 2 遍格子 2 变成 0.225；算到后来，三个数不再变化，就是这个策略的价值。",
+      code: "for k in range(很多遍):\n    V[s] = Σ_a π(a|s) * (r + γ * V[s'])   # 对每个格子 s" },
+    { qtab: true, vals: [null, D.V[0], D.V[1], D.V[2], null],
+      say: "第二件事是策略改进：用算出的价值给每个动作算 Q，每个格子改选 Q 更大的动作。三个格子都是“右”的 Q 更大，新策略就是一直向右。书里的策略改进定理保证：这样改出来的新策略，每个状态的价值都不会比原来低。",
+      code: "π_新(s) = argmax_a (r + γ V(s'))" },
+    { pi: true, opt: true, vals: [null, D.Vopt[0], D.Vopt[1], D.Vopt[2], null],
+      say: "把评估和改进轮流做，叫策略迭代。第 1 轮评估一半左、一半右的策略，改进成一直向右；第 2 轮评估一直向右的策略，价值是 0.81、0.9、1，再改进，三个格子还是选“右”，策略不再变化，这时的策略就是最优策略。",
+      code: "while True:\n    V = 策略评估(π)\n    π_新 = 策略改进(V)\n    if π_新 == π: break\n    π = π_新" },
+    { vi: true, opt: true, vals: [null, D.Vopt[0], D.Vopt[1], D.Vopt[2], null], valLabel: "V* = ",
+      say: "策略迭代每一轮都要把评估算到不再变化，比较费事。价值迭代把两件事合成一步：每一遍对每个格子，直接取“这一步的奖励 + 0.9 × 下一个格子的价值”最大的那个动作。第 1 遍格子 3 变成 1；第 2 遍格子 2 变成 0.9；第 3 遍格子 1 变成 0.81；之后不再变化，得到的就是 V*。",
+      code: "V[s] = max_a (r + γ * V[s'])   # 贝尔曼最优方程，当成更新规则用" },
+    { gpi: true, opt: true,
+      say: "书里把这种“评估和改进互相推动”叫广义策略迭代（GPI）：评估让价值符合现在的策略，改进让策略照着现在的价值变好，两者来回推动，最后都停在最优。后面几页的蒙特卡洛、时序差分、策略梯度，都是在不知道环境规则的情况下，用不同的办法做评估和改进。",
+      code: "# 广义策略迭代：评估 ⇄ 改进" }
+  ];
+
+  makeView({ P: "d-", key: "dp", steps: STEPS, notes: {}, draw: draw,
+    legend: [["hot", "这一步讲到的格子"], ["hi", "这一步看的数"]] });
+})();
+
+/* ===== 第 5 页：蒙特卡洛与时序差分（第 5、6、7 章） ===== */
+(function () {
+  var X = 125;
+  function path(ep) {
+    var s = CELL[ep[0][0]];
+    ep.forEach(function (r) { var to = r[1] ? r[0] + 1 : r[0] - 1; s += " →" + ACT[r[1]] + "→ " + CELL[to]; });
+    return s;
+  }
+  function q(s, a) { return D.Q[s + "," + a]; }
+
+  function draw(A, root, s) {
+    var y = 20;
+    A.mk("text", { "class": "gtitle", x: X, y: y + 12 }, root, "照一半左、一半右的策略跑出的 4 个回合（和“策略梯度”那一页是同一批）");
+    D.EP.forEach(function (ep, i) {
+      var yy = y + 38 + i * 26, hot = s.hotEp === i;
+      A.mk("text", { "class": "titlecn", x: X, y: yy }, root, "回合 " + (i + 1));
+      A.mk("text", { "class": "subcode", x: X + 70, y: yy, style: hot ? "fill: var(--warm); font-weight: 600" : "" }, root, path(ep) + (ep[ep.length - 1][0] + (ep[ep.length - 1][1] ? 1 : -1) === 4 ? "（1 分）" : "（0 分）"));
+    });
+    var gy = 160;
+    if (s.mc || s.td) {
+      var M = [0, 1, 2, 3].map(function (i) {
+        var row = [];
+        row = row.concat(s.mc ? D.MC[i].map(function (v) { return fmt(v, 3); }) : ["", "", ""]);
+        if (s.td) row = row.concat(D.TD[i].map(function (v) { return fmt(v, 3); }));
+        return row;
+      });
+      var cols = ["蒙特卡洛 V(1)", "V(2)", "V(3)"];
+      if (s.td) cols = cols.concat(["时序差分 V(1)", "V(2)", "V(3)"]);
+      A.grid(root, X + 110, gy, M, { title: "从全是 0 开始，学习率 α = 0.5，每个回合之后的价值估计", rows: ["回合 1 之后", "回合 2 之后", "回合 3 之后", "回合 4 之后"], cols: cols, cw: 105, hiRow: s.hiRow });
+      A.mk("text", { "class": "sub", x: X + 110, y: gy + 40 + 4 * 28 + 24 }, root, "照这个策略的真实价值：" + D.V.map(function (v) { return fmt(v, 3); }).join("、"));
+    }
+    if (s.nstep) {
+      var N = [["n = 1", "R₁ + γV(S₁)", "时序差分"], ["n = 2", "R₁ + γR₂ + γ²V(S₂)", "第 7 章"], ["n = 3", "R₁ + γR₂ + γ²R₃ + γ³V(S₃)", "第 7 章"], ["n 到回合结束", "R₁ + γR₂ + … + γ^(T−1)R_T", "蒙特卡洛"]];
+      A.grid(root, X + 110, gy, N, { title: "n 步回报：先用 n 步真实奖励，再用第 n 步之后那个状态的价值估计", rows: ["", "", "", ""], cols: ["往后看几步", "更新的目标", "对应的方法"], cw: 210 });
+    }
+    if (s.ctrl) {
+      var C = [["Sarsa（同策略）", "0 + 0.9 × Q(格子 2, 左)", "0 + 0.9 × " + fmt(q(2, 0), 3) + " = " + fmt(0.9 * q(2, 0), 3)], ["Q-learning（离策略）", "0 + 0.9 × max_a Q(格子 2, a)", "0 + 0.9 × " + fmt(q(2, 1), 3) + " = " + fmt(0.9 * q(2, 1), 3)]];
+      A.grid(root, X + 10, gy, C, { title: "在格子 3 选了“左”，到格子 2，下一个动作抽到“左”：更新 Q(格子 3, 左) 的目标", cols: ["方法", "目标怎么算", "目标的值"], cw: 270, hiCols: [2] });
+    }
+  }
+
+  var STEPS = [
+    {
+      say: "动态规划要事先知道环境的规则，大多数问题做不到。第 5、6 章的方法只用智能体实际跑出来的回合来学习。这里用照一半左、一半右的策略跑出的 4 个回合，看两种方法怎样从这些回合里估计每个格子的价值。",
+      code: "episodes = [跑一个回合(π) for _ in range(4)]   # 不需要环境的规则" },
+    { mc: true, hiRow: 0, hotEp: 0,
+      say: "蒙特卡洛方法（第 5 章）等一个回合跑完，算出每一步之后的实际回报 G，再把这一步所在格子的价值往 G 挪一半：V(s) ← V(s) + 0.5 × (G − V(s))。回合 1 里格子 2 之后的回报是 0.9，格子 3 之后是 1，所以 V(格子 2) = 0 + 0.5 × 0.9 = 0.45，V(格子 3) = 0.5。回合 2 掉进坑，回报全是 0，V(格子 2) 被拉回 0.225。",
+      code: "V[s] += α * (G_t - V[s])   # 回合结束以后才更新" },
+    { mc: true, td: true, hiRow: 0, hotEp: 0,
+      say: "时序差分学习（第 6 章）不等回合结束，每走一步就更新：目标是“这一步的奖励 + 0.9 × 下一个格子现在的价值估计”。回合 1 第 1 步从格子 2 走到格子 3，这时 V(格子 3) 还是 0，目标是 0，所以 V(格子 2) 不变；第 2 步走进终点，V(格子 3) = 0.5。到回合 3，格子 3 已经有了价值，格子 2 才跟着变成 " + fmt(D.TD[2][1], 3) + "。用下一个状态的价值估计来更新，叫自举。",
+      code: "V[s] += α * (r + γ * V[s'] - V[s])   # 每一步都更新" },
+    { mc: true, td: true, hiRow: 3,
+      say: "两种方法各有代价。蒙特卡洛的目标是真实回报，平均下来是准的，但要等回合结束，而且一次回合的运气对它影响很大：4 个回合以后 V(格子 2) 从 0.688 跳到 0.172。时序差分每一步都能学，目标里用的是估计值，一开始会偏，但波动小，书里的随机游走例子显示它通常学得更快。",
+      code: "# 蒙特卡洛：目标 = 实际回报，无偏，波动大\n# 时序差分：目标 = 奖励 + 价值估计，有偏，波动小" },
+    { nstep: true,
+      say: "第 7 章把两者连起来：n 步方法先用 n 步真实奖励，再用第 n 步之后那个状态的价值估计。n = 1 就是时序差分；n 一直加到回合结束，最后不再用价值估计，就是蒙特卡洛。n 是一个可以调的数，常常取中间的值效果最好。",
+      code: "G_(t:t+n) = R_(t+1) + γR_(t+2) + … + γ^(n−1)R_(t+n) + γ^n V(S_(t+n))" },
+    { ctrl: true,
+      say: "上面都是预测：估计一个策略的价值。要改进策略，就估计动作价值 Q，再按 Q 选动作。第 6 章的两种做法只差在目标上：Sarsa 用实际抽到的下一个动作的 Q，学的是现在这个策略本身的价值，叫同策略；Q-learning 用下一个状态里最大的 Q，不管实际抽到了什么，学的是最优策略的价值，叫离策略。同一步更新，两者的目标分别是 " + fmt(0.9 * q(2, 0), 3) + " 和 " + fmt(0.9 * q(2, 1), 3) + "。",
+      code: "Sarsa：      Q[s,a] += α * (r + γ * Q[s', a'] - Q[s,a])\nQ-learning：  Q[s,a] += α * (r + γ * max_a' Q[s', a'] - Q[s,a])" }
+  ];
+
+  makeView({ P: "t-", key: "mctd", steps: STEPS, notes: {}, draw: draw,
+    legend: [["hi", "这一步看的那一行"]] });
+})();
+
+/* ===== 第 6 页：规划与学习（第 8 章） ===== */
+(function () {
+  var X = 125;
+  function draw(A, root, s) {
+    var S = { on: ["real", "model", "q"], hot: s.hot || [] };
+    A.box(root, S, "real", 40, 30, 260, 70, "真实的经历", "在环境里真的走一步", { cn: true, env: true });
+    A.box(root, S, "model", 370, 30, 260, 70, "环境模型", "记下：在 s 选 a，到了 s'，得 r", { cn: true });
+    A.box(root, S, "q", 700, 30, 260, 70, "Q 表", "用 Q-learning 更新", { cn: true, proc: true });
+    A.arrow(root, "M302 65 H366"); A.label(root, 334, 57, "记下", "", "middle");
+    A.arrow(root, "M302 85 H330 V120 H830 V104");
+    A.label(root, 560, 136, "直接学习：用真实的一步更新", "", "middle");
+    if (s.plan) {
+      A.arrow(root, "M632 65 H696", "warm"); A.label(root, 664, 57, "重放", "warm", "middle");
+      A.label(root, 664, 22, "规划：不走新的一步", "warm", "middle");
+    }
+    if (s.rows) {
+      var M = D.dyna.slice(0, s.rows).map(function (r) { return [r[1], fmt(r[2], 3), fmt(r[3], 3)]; });
+      A.grid(root, X + 130, 170, M, { title: "从全是 0 开始，α = 0.5：一个真实回合（格子 2 →右→ 格子 3 →右→ 终点）之后", rows: D.dyna.slice(0, s.rows).map(function (r) { return r[0]; }), cols: ["做了什么", "Q(格子 2, 右)", "Q(格子 3, 右)"], cw: 170, hiRow: s.rows - 1 });
+      A.mk("text", { "class": "sub", x: X + 130, y: 170 + 40 + s.rows * 28 + 24 }, root, "最优的值：Q*(格子 2, 右) = 0.9，Q*(格子 3, 右) = 1");
+    }
+  }
+
+  var STEPS = [
+    { hot: ["real", "q"], rows: 2,
+      say: "第 8 章讲规划。先看只学习不规划的情况：机器人真实地走了一个回合，格子 2 →右→ 格子 3 →右→ 终点，每走一步就用 Q-learning 更新一次。第 1 步时 Q(格子 3, 右) 还是 0，所以 Q(格子 2, 右) 学不到东西；第 2 步走进终点，Q(格子 3, 右) 变成 0.5。一个回合下来，终点的奖励只往回传了一格。",
+      code: "Q[s,a] += 0.5 * (r + 0.9 * max Q[s'] - Q[s,a])   # 每走一步更新一次" },
+    { hot: ["model"], rows: 2,
+      say: "Dyna 的做法是：每走一步，除了更新 Q，还把这一步记进环境模型：在格子 2 选“右”到了格子 3、得 0 分；在格子 3 选“右”到了终点、得 1 分。这个模型就是智能体自己学到的“环境的规则”，和动态规划事先知道的规则是同一种东西。",
+      code: "model[(s, a)] = (s', r)   # 把真实的一步记下来" },
+    { hot: ["model", "q"], rows: 6, plan: true,
+      say: "规划就是从模型里取出记下的步，假装又走了一遍，用同样的 Q-learning 规则更新。不走任何新的真实步，把两条记录各重放一次算一遍，Q(格子 2, 右) 从 0 变成 0.225；重放到第 4 遍，变成 " + fmt(D.dyna[5][2], 3) + "，已经接近最优的 0.9。真实经历很贵（例如语言模型写一条回答、机器人真的走一步），规划让同一份经历被用很多遍。",
+      code: "for _ in range(规划次数):\n    (s, a) = 从 model 里取一条\n    (s', r) = model[(s, a)]\n    Q[s,a] += 0.5 * (r + 0.9 * max Q[s'] - Q[s,a])" },
+    { hot: ["model"], rows: 6, plan: true,
+      say: "第 8 章后半部分讲规划的其他形式：优先扫描先重放价值变化大的那几步；在做决定的那一刻才展开规划，例如蒙特卡洛树搜索，AlphaGo 每走一步棋之前都用它往后模拟很多盘。第 8 章最后用“宽度”和“深度”两个维度总结第一部分，就是“全貌”那一页的统一视角图。",
+      code: "# 优先扫描、决策时规划、蒙特卡洛树搜索（MCTS）" }
+  ];
+
+  makeView({ P: "n-", key: "plan", steps: STEPS, notes: {}, draw: draw,
+    legend: [["hot", "这一步讲到的部分"], ["hi", "这一步那一行"]] });
+})();
+
+/* ===== 第 7 页：函数近似（第 9–12 章） ===== */
+(function () {
+  var X = 125, Y = 30;
+  var HALF = { 1: 0.5, 2: 0.5, 3: 0.5 };
+  function draw(A, root, s) {
+    corridor(A, root, X, Y, { p: HALF, vals: s.vals, valLabel: "v̂ = ", hot: s.hot });
+    var y = 170, gx = X + 130;
+    if (s.feat) {
+      var F = [1, 2, 3].map(function (c) { return ["1", String(c), s.fit ? fmt(D.vls[c - 1], 3) : "", fmt(D.V[c - 1], 3)]; });
+      A.grid(root, gx, y, F, { title: s.fit ? "w = (" + fmt(D.wls[0], 3) + ", " + fmt(D.wls[1], 3) + ")：误差最小的一组权重" : "每个格子的特征 x(s) = (1, 格子编号)", rows: ["格子 1", "格子 2", "格子 3"], cols: ["特征 1", "特征 2", "v̂ = w · x", "真实的 V"], cw: 130, hiCols: s.fit ? [2] : [] });
+    }
+    if (s.td) {
+      var T = [["(0, 0)", "1 + 0 − 0 = 1", "(0.1, 0.3)", D.v1.map(function (v) { return fmt(v, 3); }).join("、")]];
+      A.grid(root, X, y, T, { title: "半梯度 TD：只走了一步（格子 3 →右→ 终点，得 1 分），学习率 0.1", cols: ["原来的 w", "δ", "新的 w", "三个格子的 v̂"], cw: 185, hiCols: [3] });
+    }
+    if (s.triad) {
+      var R = [["函数近似", "用带权重的函数代替每个状态一格的表"], ["自举", "更新的目标里用了价值估计（时序差分、动态规划）"], ["离策略训练", "学的策略和产生数据的策略不是同一个（例如 Q-learning）"]];
+      A.grid(root, X + 60, y, R, { title: "第 11 章：致命三要素，三样同时出现时，价值估计可能越学越大、不收敛", rows: ["", "", ""], cols: ["要素", "是什么"], cw: 340 });
+    }
+    if (s.lam) {
+      var L = [D.lamw.map(function (v) { return v.toFixed(4); })];
+      A.grid(root, gx - 40, y, L, { title: "λ = 0.95 时，λ-回报给各个 n 步回报的权重 (1 − λ) λ^(n−1)", rows: ["权重"], cols: ["n = 1", "n = 2", "n = 3", "n = 4", "n = 5"], cw: 110 });
+      A.mk("text", { "class": "sub", x: gx - 40, y: y + 40 + 28 + 26 }, root, "λ = 0：全部权重在 n = 1，就是时序差分；λ = 1：全部权重在回合结束，就是蒙特卡洛");
+    }
+  }
+
+  var STEPS = [
+    { feat: true,
+      say: "第一部分的方法给每个状态一格，记它的价值。状态多到放不下的时候（例如语言模型的“题目 + 已写出的 token”），就要用一个带权重的函数去估计价值：v̂(s, w)。最简单的是线性函数：每个状态先算成几个数，叫特征 x(s)，价值估计就是特征和权重的点积。走廊里取两个特征：常数 1 和格子编号，于是只用两个权重就能给所有格子估计价值。",
+      code: "v̂(s, w) = w · x(s) = w₁ × 1 + w₂ × 格子编号" },
+    { feat: true, fit: true, vals: [null, D.vls[0], D.vls[1], D.vls[2], null], hot: [1, 2, 3],
+      say: "两个权重最好能做到什么程度？算出误差最小的一组 w = (" + fmt(D.wls[0], 3) + ", " + fmt(D.wls[1], 3) + ")，三个格子的估计是 " + D.vls.map(function (v) { return fmt(v, 3); }).join("、") + "，真实值是 " + D.V.map(function (v) { return fmt(v, 3); }).join("、") + "，没法完全一样：一条直线穿不过三个不在一条直线上的点。第 9 章用“各个状态的平方误差，按状态出现的频率加权”来衡量这种近似有多好。",
+      code: "目标：让 Σ_s μ(s) × (V_π(s) − v̂(s, w))² 最小   # μ(s) 是状态 s 出现的频率" },
+    { td: true, vals: [null, D.v1[0], D.v1[1], D.v1[2], null], hot: [1, 2, 3],
+      say: "怎么学 w：把时序差分的更新搬过来，改的不再是某一格，而是权重。机器人从格子 3 走进终点得 1 分，δ = 1 + 0 − 0 = 1，w 加上 0.1 × δ × x(格子 3) = (0.1, 0.3)。只走了一步，三个格子的估计都变了：0.4、0.7、1.0。改一个状态会影响别的状态，这叫泛化，函数近似的好处和麻烦都来自它。目标里也用了 v̂，但求梯度时不管它，所以叫半梯度。",
+      code: "δ = r + γ v̂(s', w) − v̂(s, w)\nw += α × δ × x(s)   # 半梯度 TD(0)" },
+    { triad: true,
+      say: "第 10 章用同样的办法估计动作价值 q̂(s, a, w) 来做控制。第 11 章讲一个重要的坑：函数近似、自举、离策略训练三样同时出现时，价值估计可能越学越大、不收敛，书里叫致命三要素。第 16 章的 Atari 案例（DQN）就同时有这三样，它用经验回放和一个隔一段时间才更新的目标网络来让训练稳定。",
+      code: "# 函数近似 + 自举 + 离策略训练 → 可能发散" },
+    { lam: true,
+      say: "第 12 章把第 7 章的 n 步方法做成一个参数 λ：λ-回报把 1 步、2 步、3 步……的回报加权平均，n 步回报的权重是 (1 − λ) λ^(n−1)，离得越远权重越小。λ = 0 就是时序差分，λ = 1 就是蒙特卡洛。资格迹是一种不用等回合结束、每一步就能实现这种加权平均的办法。PPO 里的 GAE 用 λ = 0.95 把每一步的 TD 误差按同样的方式加权平均，就是这个想法用在优势上。",
+      code: "G^λ_t = (1 − λ) Σ_n λ^(n−1) G_(t:t+n)" }
+  ];
+
+  makeView({ P: "f-", key: "approx", steps: STEPS, notes: {}, draw: draw,
+    legend: [["hot", "这一步算出估计的格子"], ["hi", "这一步看的数"]] });
+})();
+
+/* ===== 第 3 页：策略梯度 ===== */
+(function () {
+  var X = 125, Y = 30;
+  var HALF = { 1: 0.5, 2: 0.5, 3: 0.5 };
+  var NEWP = { 1: D.newp["1"], 2: D.newp["2"], 3: D.newp["3"] };
+  var VS = { 1: D.V[0], 2: D.V[1], 3: D.V[2] };
+  var ROWS = [], LAB = [];
+  D.EP.forEach(function (ep, e) { ep.forEach(function (r, t) { ROWS.push(r); LAB.push("回合 " + (e + 1) + " · 第 " + (t + 1) + " 步"); }); });
+  var BAD = 5;   // 回合 3 第 2 步：在格子 3 选了“左”
+
+  function draw(A, root, s) {
+    var L = D.curve[D.curve.length - 1];
+    corridor(A, root, X, Y, { p: s.curve ? { 1: L[0], 2: L[1], 3: L[2] } : s.newp ? NEWP : HALF });
+    if (s.cols) {
+      var M = ROWS.map(function (r) {
+        var row = [CELL[r[0]], ACT[r[1]], String(r[2])];
+        if (s.cols >= 4) row.push(fmt(r[3], 3));
+        if (s.cols >= 5) { row.push(fmt(VS[r[0]], 3)); row.push(fmt(r[4], 3)); }
+        return row;
+      });
+      var cols = ["状态", "动作", "奖励", "回报 G", "V(状态)", "优势 = G − V"].slice(0, M[0].length);
+      A.grid(root, 260, 160, M, { rows: LAB, cols: cols, cw: 110, hiRow: s.hiRow, hiCols: s.hiCol !== undefined ? [s.hiCol] : [] });
+    }
+    if (s.upd) {
+      var U = [1, 2, 3].map(function (c) { return [fmt(D.grad[String(c)], 4), "0.500", fmt(NEWP[c], 3)]; });
+      A.grid(root, 260, 180, U, { title: "用 4 个回合更新一次：每个格子一个 θ，p(右) = 1 ÷ (1 + e^(−θ))", rows: ["格子 1", "格子 2", "格子 3"], cols: ["θ 的变化方向", "原来的 p(右)", "新的 p(右)"], cw: 150, hiCols: [2] });
+    }
+    if (s.curve) {
+      var cx = 230, cy = 180, w = 620, h = 300;
+      A.mk("text", { "class": "gtitle", x: cx - 40, y: cy - 14 }, root, "重复 60 次：每次跑 4 个回合、更新一次，每个格子选“右”的概率");
+      A.mk("path", { "class": "axis", d: "M" + cx + " " + cy + " V" + (cy + h) + " H" + (cx + w) }, root);
+      [0.5, 0.75, 1].forEach(function (v) {
+        var yy = cy + h - (v - 0.4) / 0.6 * h;
+        A.mk("path", { "class": "guide", d: "M" + cx + " " + yy + " H" + (cx + w) }, root);
+        A.mk("text", { "class": "glabel", x: cx - 8, y: yy + 4, "text-anchor": "end" }, root, v.toFixed(2));
+      });
+      var colors = ["var(--muted)", "var(--accent)", "var(--warm)"];
+      [0, 1, 2].forEach(function (c) {
+        var d = D.curve.map(function (p, i) { return (i ? "L" : "M") + (cx + i / (D.curve.length - 1) * w) + " " + (cy + h - (p[c] - 0.4) / 0.6 * h); }).join(" ");
+        A.mk("path", { d: d, fill: "none", stroke: colors[c], "stroke-width": 2.5 }, root);
+        var last = D.curve[D.curve.length - 1][c];
+        A.mk("text", { "class": "glabel", x: cx + w + 8, y: cy + h - (last - 0.4) / 0.6 * h + 4 + [0, -8, 8][c] }, root, CELL[c + 1] + " " + last.toFixed(3));
+      });
+      A.mk("text", { "class": "glabel", x: cx + w, y: cy + h + 18, "text-anchor": "end" }, root, "更新次数 →");
+    }
+  }
+
+  var STEPS = [
+    { cols: 0,
+      say: "第 13 章换一个思路：前面的方法都先估计价值，再按价值选动作；策略梯度方法直接用带权重的函数表示策略，按回报的梯度去改权重。它不需要环境的规则，也不需要把每个状态的价值都算出来，所以语言模型的强化学习都建立在这一章上。做法是：照当前策略跑几个回合，再根据跑出来的结果改概率。",
+      code: "episodes = [run_episode(policy, env) for _ in range(4)]   # 照当前策略跑 4 个回合" },
+    { cols: 3,
+      say: "机器人照一半左、一半右的策略跑了 4 个回合，表里按时间顺序记下每一步的状态、动作、奖励。回合 1 和回合 3 走到了终点，回合 2 和回合 4 掉进了坑。回合 3 在格子 3 先选了“左”，绕回格子 2 才走到终点。",
+      code: "# 每一步记下 (状态, 动作, 奖励)" },
+    { cols: 4, hiCol: 3,
+      say: "每一步算一个回报 G：从这一步开始到回合结束的奖励，按 0.9 打折加起来。回合 1 第 1 步：这一步 0 分，下一步 1 分，G = 0 + 0.9 × 1 = 0.9。掉进坑的回合，每一步的 G 都是 0。G 说明这一步之后实际拿到了多少。",
+      code: "G_t = r_t + 0.9 * r_(t+1) + 0.9**2 * r_(t+2) + ...   # 从最后一步往前算：G_t = r_t + 0.9 * G_(t+1)" },
+    { cols: 4, hiRow: BAD,
+      say: "最简单的策略梯度：每一步把“在这个状态选这个动作”的概率往上推，推多少和 G 成正比。问题有两个。第一，G 在这条走廊里不会小于 0，所以选过的动作只会被推高或不动，没有被压低的；掉进坑的回合 G 全是 0，格子 1 上的动作什么也学不到。第二，回合 3 第 2 步在格子 3 选了“左”，这是坏动作，可它的 G 是 " + fmt(ROWS[BAD][3], 3) + "，照样被推高很多，因为后面碰巧走到了终点。",
+      code: "θ += 学习率 × G_t × ∇ log π(a_t | s_t)   # 不减基线" },
+    { cols: 5, hiCol: 5, hiRow: BAD,
+      say: "改进办法是减去一个基线：用 G 减去这个状态的价值 V，得到优势。优势说明这一步之后拿到的，比照策略平均能拿的多多少。回合 3 第 2 步：" + fmt(ROWS[BAD][3], 3) + " − " + fmt(VS[3], 3) + " = " + fmt(ROWS[BAD][4], 3) + "，被推高的量小了很多；掉进坑的回合，每一步的优势都是负数，那些动作被压低。格子 1 上的动作也有了信号。",
+      code: "A_t = G_t − V(s_t)\nθ += 学习率 × A_t × ∇ log π(a_t | s_t)   # 减了基线" },
+    { upd: true, newp: true,
+      say: "具体怎么推：每个格子有一个数 θ，选“右”的概率 p(右) = 1 ÷ (1 + e^(−θ))，一开始 θ = 0，p(右) = 0.5。某一步选了“右”，θ 加上 优势 × (1 − p)；选了“左”，θ 加上 优势 × (−p)。把 4 个回合里每一步的这个量按格子加起来，除以 4，乘学习率 0.5。格子 2 的 θ 变化最大，p(右) 从 0.5 变成 " + fmt(NEWP[2], 3) + "；格子 1 和格子 3 也都往“右”多了一点。",
+      code: "∇ log π(右) = 1 − p；∇ log π(左) = −p\nθ[s] += 0.5 * 平均(A_t * ∇ log π(a_t))   # 格子 2：0 + 0.5 × " + fmt(D.grad["2"], 4) },
+    { curve: true, newp: false,
+      say: "把“跑 4 个回合、更新一次”重复 60 次，每次用更新后的策略重新跑回合，基线 V 也按当前策略重新算。三个格子选“右”的概率都一路往上走：格子 2 到了 " + D.curve[D.curve.length - 1][1].toFixed(3) + "。机器人没有被告诉“向右是对的”，它只是从自己跑出来的回合里，把比平均好的动作推高、比平均差的动作压低。",
+      code: "for it in range(60):\n    episodes = run_episodes(policy, 4)\n    update(policy, episodes, baseline=V)" },
+    { curve: true,
+      say: "上面的做法叫带基线的 REINFORCE（第 13.4 节），它要等回合结束才知道 G。第 13.5 节的 actor-critic 不等：另学一个价值函数（评论家），每走一步就用 TD 误差 δ = r + γV(s') − V(s) 代替 G − V，去更新策略（行动者）。例如回合 1 第 1 步：δ = 0 + 0.9 × " + fmt(VS[3], 3) + " − " + fmt(VS[2], 3) + " = " + fmt(0.9 * VS[3] - VS[2], 3) + "。PPO 里的价值模型就是评论家，GAE 是把几步的 δ 按 λ 加权起来当优势。",
+      code: "δ = r + γ V(s') − V(s)          # 评论家给这一步打分\nθ += α × δ × ∇ log π(a | s)     # 行动者按 δ 更新\nV(s) += α_V × δ                  # 评论家也按 δ 更新" }
+  ];
+
+  makeView({ P: "g-", key: "pg", steps: STEPS, notes: {}, draw: draw,
+    legend: [["hi", "这一步看的数"]] });
+})();
+
+/* ===== 第三部分：第 14–17 章 ===== */
+(function () {
+  var X = 210;
+  function draw(A, root, s) {
+    var y = 24;
+    if (s.mode === "psy") {
+      var P = [["经典条件反射", "狗听到铃声以后会得到食物，学会听到铃声就流口水", "预测：估计价值（第 5、6 章）"], ["工具性条件反射", "猫在笼子里乱试，碰到机关才能出去，出去越来越快", "控制：改策略（第 4–6、13 章）"], ["Rescorla–Wagner 模型", "按“实际得到的 − 预计的”调整预计", "TD 误差的前身"], ["TD 模型", "把上面的误差扩展到时间上的每一步", "第 6 章的 TD(0)"]];
+      A.grid(root, 110, y, P, { title: "第 14 章：心理学里的说法和强化学习里对应的东西", rows: ["", "", "", ""], cols: ["心理学的说法", "例子", "强化学习里对应的"], cws: [190, 400, 230], hiRow: s.hi });
+    }
+    if (s.mode === "dopa") {
+      var Dt = [["0", "0", "1", "终点的 1 分出乎意料"], ["0.9", "0", "0", "出发那一刻就知道会得分"], ["0.9", "0", "−1", "预计的 1 分没有来"]];
+      A.grid(root, X - 40, y, Dt, { title: "走廊里每个时刻的 TD 误差 δ = 这一步的奖励 + 下一个状态的价值 − 这一个状态的价值", rows: ["学之前（V 全是 0）", "学会以后（V = V*）", "学会以后，终点没给分"], cols: ["出发那一刻", "第 1 步（格子 2 → 3）", "第 2 步（格子 3 → 终点）", "说明"], cws: [140, 170, 190, 200], hiRow: s.hi });
+      A.mk("text", { "class": "sub", x: X - 40, y: y + 40 + 3 * 28 + 26 }, root, "出发那一刻：从“什么都不预计”（0）变成“在格子 2”（价值 V），δ = 0 + V(格子 2) − 0");
+    }
+    if (s.mode === "app") {
+      var Ap = [["16.1 TD-Gammon", "西洋双陆棋", "TD(λ) + 神经网络，自己和自己下"], ["16.2 Samuel 的跳棋程序", "跳棋", "往后搜索 + 线性函数近似 + 类似 TD 的更新"], ["16.3 Watson 的每日双倍下注", "Jeopardy! 问答节目", "比较不同下注额的动作价值"], ["16.4 内存控制", "计算机内存的命令调度", "Sarsa + 线性函数近似"], ["16.5 像人一样玩电子游戏", "Atari 游戏", "DQN：Q-learning + 卷积网络 + 经验回放 + 目标网络"], ["16.6 下围棋", "围棋", "AlphaGo / AlphaGo Zero：策略网络、价值网络 + 蒙特卡洛树搜索"], ["16.7 个性化网页服务", "给用户推荐内容", "上下文赌博机 vs MDP，离策略评估"], ["16.8 热气流滑翔", "滑翔机在热气流里爬升", "Sarsa + 函数近似"]];
+      A.grid(root, 70, y, Ap, { title: "第 16 章：8 个应用案例", rows: Ap.map(function () { return ""; }), cols: ["案例", "问题", "用了哪些方法"], cws: [220, 200, 450], hiRow: s.hi });
+    }
+    if (s.mode === "front") {
+      var F = [["17.1 广义价值函数和辅助任务", "价值函数不只预测奖励，也可以预测别的信号"], ["17.2 用选项做时间上的抽象", "把多步动作打包成一个“选项”，在更粗的时间尺度上做决策"], ["17.3 观测和状态", "智能体看到的只是观测，要自己构造出状态"], ["17.4 设计奖励信号", "奖励写得不好，智能体会钻空子"], ["17.5 剩下的问题", "表示学习、高效的模型学习等还没解决的问题"], ["17.6 强化学习和人工智能的未来", "强化学习对社会的影响和安全问题"]];
+      A.grid(root, X - 60, y, F, { title: "第 17 章：前沿", rows: F.map(function () { return ""; }), cols: ["小节", "讲什么"], cws: [270, 480], hiRow: s.hi });
+    }
+  }
+
+  var STEPS = [
+    { mode: "psy",
+      say: "第三部分不讲新算法，讲强化学习和别的学科的联系，以及它用在了哪里。第 14 章对照心理学：强化学习里的“预测”对应经典条件反射，例如狗学会听到铃声就预计有食物；“控制”对应工具性条件反射，例如 Thorndike 实验里的猫，从乱试到学会碰机关逃出笼子。",
+      code: "预测 ↔ 经典条件反射\n控制 ↔ 工具性条件反射" },
+    { mode: "psy", hi: 2,
+      say: "心理学里的 Rescorla–Wagner 模型按“实际得到的 − 预计的”去调整预计，这和 TD 误差的形状一样，只是没有考虑时间上的先后。书里的 TD 模型把这个误差扩展到每一个时刻，用来解释动物在条件反射实验里的表现。",
+      code: "Rescorla–Wagner：ΔV = α × (实际得到的 − 预计的)\nTD：δ = r + γV(s') − V(s)" },
+    { mode: "dopa", hi: 0,
+      say: "第 15 章对照神经科学，核心是多巴胺的奖励预测误差假说：中脑的多巴胺神经元发出的信号，和 TD 误差 δ 很像。用走廊来算：学之前每个格子的价值都是 0，机器人走进终点那一步 δ = 1 + 0 − 0 = 1，误差出现在拿到奖励的那一刻。",
+      code: "δ = r + γV(s') − V(s)   # 学之前：只有走进终点那一步 δ = 1" },
+    { mode: "dopa", hi: 1,
+      say: "学会以后，价值是 V* = 0.81、0.9、1。机器人一出现在格子 2，δ = 0 + 0.9 − 0 = 0.9，误差提前到了“出发那一刻”；之后每一步都和预计的一样，δ = 0；走进终点那一步 δ = 1 + 0 − 1 = 0。Schultz 等人记录的猴子多巴胺神经元就是这样：学会以后，它在预示奖励的信号出现时放电，在奖励本身到来时不再放电；Schultz、Dayan、Montague 1997 年在 Science 上把这种放电和 TD 误差对上。",
+      code: "第 1 步：0 + 0.9 × 1 − 0.9 = 0\n第 2 步：1 + 0 − 1 = 0" },
+    { mode: "dopa", hi: 2,
+      say: "如果学会以后，终点这次没给分，最后一步 δ = 0 + 0 − 1 = −1，是负的。实验里的多巴胺神经元在预计的奖励没有出现时，放电会降到平时以下，正好对上这个负的误差。第 15 章还讨论了大脑里可能的 actor-critic 结构：一部分负责选动作，一部分负责估计价值，多巴胺把 δ 同时送给两边。书里强调这仍然是一个假说。",
+      code: "预计的奖励没来：δ = 0 + 0 − 1 = −1" },
+    { mode: "app",
+      say: "第 16 章讲 8 个应用案例，表里列出每个案例用了前面哪几章的方法。早期的案例（TD-Gammon、Samuel 的跳棋程序）靠人设计的特征加函数近似；后来的 DQN 和 AlphaGo Zero 用神经网络自己学特征。AlphaGo 把学出来的价值和策略，和第 8 章的蒙特卡洛树搜索结合在一起。",
+      code: "# 16.1–16.8：TD-Gammon、Samuel 跳棋、Watson 下注、内存控制、Atari、围棋、网页服务、热气流滑翔" },
+    { mode: "front", hi: 3,
+      say: "第 17 章讲还在发展的方向，共 6 节。其中“设计奖励信号”和语言模型最相关：奖励写得不好，智能体会钻空子，拿到高分却没做成要做的事。agentic RL 页面里，环境判分前先把测试文件恢复原样，就是在防这种钻空子；PPO 页面里的 KL 惩罚，也是为了不让策略模型为了拿分走得太远。",
+      code: "# 17.4 设计奖励信号：奖励写错，智能体就会去优化写错的那个东西" }
+  ];
+
+  makeView({ P: "x-", key: "deeper", steps: STEPS, notes: {}, draw: draw,
+    legend: [["hi", "这一步看的那一行"]] });
+})();
+
+/* ===== 第 4 页：从走廊到语言模型 ===== */
+(function () {
+  var MAP = [
+    ["智能体", "机器人", "语言模型（策略模型）"],
+    ["状态", "机器人在哪个格子：3 种", "题目 + 已经写出的 token：多到数不清，而且几乎不会重复"],
+    ["动作", "左、右：2 种", "下一个 token：词表里的每个 token，几万种"],
+    ["策略", "每个格子选“右”的概率 p(右)", "语言模型给下一个 token 的概率"],
+    ["回合结束", "掉进坑或走进终点", "写出结束符"],
+    ["奖励", "走进终点那一步 1 分，其余 0 分", "写完以后判分（例如答对 1 分），只在最后一个 token 上"],
+    ["折扣因子 γ", "0.9", "通常取 1：回答长短不靠打折来控制"],
+    ["基线 V", "按贝尔曼方程算出 3 个格子的价值（第 4 章）", "用价值模型预计（PPO），或用同一题一组回答的平均判分（GRPO）"]
+  ];
+  var X = 40, C1 = 190, C2 = 470, Y0 = 30, RH = 52;
+
+  function draw(A, root, s) {
+    A.mk("text", { "class": "gtitle", x: C1, y: Y0 }, root, "走廊");
+    A.mk("text", { "class": "gtitle", x: C2, y: Y0 }, root, "语言模型写回答");
+    MAP.forEach(function (m, i) {
+      if (i >= s.n) return;
+      var y = Y0 + 14 + i * RH, hot = s.hot && s.hot.indexOf(i) >= 0;
+      A.mk("rect", { x: X - 10, y: y, width: 950, height: RH - 8, rx: 8, fill: hot ? "color-mix(in srgb, var(--warm) 16%, var(--panel))" : "var(--panel)", stroke: hot ? "var(--warm)" : "var(--line)" }, root);
+      A.mk("text", { "class": "titlecn", x: X, y: y + 27 }, root, m[0]);
+      A.mk("text", { "class": "sub", x: C1, y: y + 27, style: "fill: var(--ink); font-size: 13.5px" }, root, m[1]);
+      A.mk("text", { "class": "sub", x: C2, y: y + 27, style: "fill: var(--ink); font-size: 13.5px" }, root, m[2]);
+    });
+  }
+
+  var STEPS = [
+    { n: 4, hot: [0, 1, 2, 3],
+      say: "这一页不在书里：书出版于 2018 年，PPO（2017 年）和 GRPO 都不在书中，但它们都是第 13 章策略梯度和 actor-critic 的延续。前面各页的概念，在语言模型上都有对应的东西。智能体是语言模型；状态是题目加上已经写出的 token；动作是下一个 token；策略就是语言模型给下一个 token 的概率。语言模型每写一个 token，就是在当前状态下按策略选了一个动作。",
+      code: "action = sample(policy(题目 + 已写出的 token))   # 下一个 token" },
+    { n: 6, hot: [4, 5],
+      say: "语言模型写出结束符，回合就结束。奖励通常只有一个：回答写完以后，奖励函数判分，答对得 1 分。这和走廊一样：机器人只在走进终点的那一步拿到 1 分，前面每一步都是 0。所以语言模型也要像走廊里那样，从最后的判分倒推每一步的回报。",
+      code: "rewards = [0, 0, ..., 0, 判分]   # 只有最后一个 token 有奖励" },
+    { n: 8, hot: [7],
+      say: "最大的不同在基线。走廊只有 3 个格子，能用贝尔曼方程把每个格子的价值算出来；语言模型的状态几乎不会重复，没法一个一个算。PPO 用另一个神经网络（价值模型）去预计每个状态的价值；GRPO 不预计，让同一道题写一组回答，用这组回答的平均判分当基线。两种做法算出的都是“策略梯度”那一页的“优势 = 回报 − 基线”。",
+      code: "PPO： A_t = 回报 − 价值模型的预计   # GAE 是它的折中算法\nGRPO：A = (判分 − 同组平均判分) ÷ 同组标准差" },
+    { n: 8, hot: [3],
+      say: "最后一处不同在更新。“策略梯度”那一页每跑 4 个回合只更新一次，用过的回合就扔掉。语言模型写一批回答很贵，PPO 想把同一批回答多用几遍，可是用过一遍以后策略已经变了，再推就可能推得太远。所以 PPO 加了比率和截断：比较新旧两个策略给同一个 token 的概率，比率超出 0.8 到 1.2 就不再往这个方向推。这部分在 PPO 页面的“策略怎么更新”那一页；多轮调用工具的情况在 agentic RL 页面。",
+      code: "ratio = π_新(a|s) / π_旧(a|s)\nloss = −min(ratio × A, clip(ratio, 0.8, 1.2) × A)" }
+  ];
+
+  makeView({ P: "l-", key: "llm", steps: STEPS, notes: {}, draw: draw,
+    legend: [["hi", "这一步讲到的对应关系"]] });
+})();
+
+</script>
+<script>
+(function () {
+  var TABS = [{"key": "map", "p": "m", "title": "强化学习 全貌"}, {"key": "bandit", "p": "b", "title": "强化学习 第 2 章 赌博机"}, {"key": "mdp", "p": "p", "title": "强化学习 第 3 章 MDP"}, {"key": "dp", "p": "d", "title": "强化学习 第 4 章 动态规划"}, {"key": "mctd", "p": "t", "title": "强化学习 第 5–7 章 蒙特卡洛与时序差分"}, {"key": "plan", "p": "n", "title": "强化学习 第 8 章 规划"}, {"key": "approx", "p": "f", "title": "强化学习 第 9–12 章 函数近似"}, {"key": "pg", "p": "g", "title": "强化学习 第 13 章 策略梯度"}, {"key": "deeper", "p": "x", "title": "强化学习 第 14–17 章 更深入"}, {"key": "llm", "p": "l", "title": "强化学习 书外：语言模型"}], active = TABS[0].key;
+  window.__setHash = function (key, n) {
+    if (key !== active) return;
+    try { history.replaceState(null, "", "#" + key + "-" + n); } catch (e) {}
+  };
+  function activate(key, step) {
+    active = key;
+    TABS.forEach(function (t) {
+      document.getElementById(t.p + "-view").hidden = (t.key !== key);
+      document.getElementById("tab-" + t.key).setAttribute("aria-selected", t.key === key ? "true" : "false");
+      if (t.key === key) document.title = t.title;
+    });
+    var v = window.__v[key];
+    v.show(step === undefined ? v.cur() : step - 1);
+  }
+  TABS.forEach(function (t) {
+    document.getElementById("tab-" + t.key).addEventListener("click", function () { activate(t.key); window.scrollTo(0, 0); });
+  });
+  function fromHash() {
+    var m = /^#([a-z]+)(?:-(\d+))?$/.exec(location.hash);
+    if (m && window.__v[m[1]]) activate(m[1], m[2] ? parseInt(m[2], 10) : undefined);
+    else activate(active);
+  }
+  window.addEventListener("hashchange", fromHash);
+  fromHash();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PPO 逐步讲解 (Copy)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #16202b; --muted: #5d6b7a; --line: #c9d1da;
+    --accent: #0b6e8a; --warm: #a8650c; --proc: #e3f1f5; --good: #2f8a4f; --bad: #b42318; --purple: #7b4fb3;
+    --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f151b; --panel: #161e26; --ink: #e6edf3; --muted: #93a1b0; --line: #2c3844;
+      --accent: #4cc0df; --warm: #f0b44c; --proc: #16303a; --good: #62d48a; --bad: #ff7b72; --purple: #b99bf0; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+  .wrap { padding: 24px 16px 40px; }
+  .view { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .view[hidden] { display: none; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0; text-wrap: balance; }
+  .gist { margin: -6px 0 0; font-size: 16px; line-height: 1.7; max-width: 48em; }
+
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  svg.diagram { display: block; width: 100%; height: auto; font-family: var(--font-body); }
+  .colhead { fill: var(--muted); font-size: 13px; font-weight: 500; }
+
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  .title { fill: var(--ink); font-family: var(--font-code); font-size: 13.5px; font-weight: 600; }
+  .titlecn { fill: var(--ink); font-size: 14px; font-weight: 700; }
+  .sub { fill: var(--muted); font-size: 12.5px; }
+  .node { opacity: 0.25; transition: opacity .45s; }
+  .node.on, .node.sel { opacity: 1; }
+  .node.hot .box { stroke: var(--accent); stroke-width: 3; }
+  .node.sel .box { stroke: var(--ink); stroke-width: 3; stroke-dasharray: 7 4; }
+  .node.proc .box { fill: var(--proc); }
+  .clickable { cursor: pointer; outline: none; }
+  .clickable:hover .box { stroke: var(--ink); }
+  .clickable:focus-visible .box { stroke: var(--ink); stroke-width: 3; }
+  .node.ghost .box { fill: none; stroke-dasharray: 6 4; stroke: var(--muted); }
+  .node.ghost .titlecn { fill: var(--muted); }
+  .node.ghost.hot .box { stroke: var(--accent); stroke-width: 2.5; }
+  .sw.ghost { border: 1.5px dashed var(--muted); background: transparent; }
+  .stack { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+
+  .info circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; }
+  .info text { fill: var(--muted); font-family: var(--font-code); font-size: 12px; font-weight: 600; }
+  .clickable:hover .info circle, .sel .info circle { fill: var(--ink); stroke: var(--ink); }
+  .clickable:hover .info text, .sel .info text { fill: var(--panel); }
+
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  .link { fill: none; stroke: var(--accent); stroke-width: 2.2; animation: fadein .45s; }
+  .link.back { stroke: var(--muted); stroke-dasharray: 5 4; }
+  .link.warm { stroke: var(--warm); }
+  .linklabel { fill: var(--accent); font-family: var(--font-code); font-size: 12px; font-weight: 600; animation: fadein .45s; }
+  .linklabel.muted { fill: var(--muted); font-family: var(--font-body); font-weight: 500; }
+  .linklabel.warm { fill: var(--warm); }
+
+  .chip rect { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+  .chip text { fill: var(--muted); font-family: var(--font-code); font-size: 13px; }
+  .chip.found rect { fill: var(--accent); stroke: var(--accent); }
+  .chip.found text { fill: #fff; font-weight: 600; }
+  .chip.new rect { fill: var(--warm); stroke: var(--warm); animation: fadein .45s; }
+  .chip.new text { fill: #fff; font-weight: 600; }
+  .chip.empty rect { fill: var(--panel); stroke-dasharray: 4 3; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.found text, :root:not([data-theme="light"]) .chip.new text { fill: #0f151b; } }
+
+  .gtitle { fill: var(--ink); font-size: 13px; font-weight: 700; }
+  .gtitle .code { font-family: var(--font-code); }
+  .glabel { fill: var(--muted); font-size: 12.5px; font-family: var(--font-code); }
+  .cell rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+  .cell .heat { stroke: none; fill: var(--accent); }
+  .cell text { font-family: var(--font-code); font-size: 12px; fill: var(--ink); }
+  .cell.hi rect.bg { fill: color-mix(in srgb, var(--warm) 22%, var(--panel)); stroke: var(--warm); }
+  .cell.dark text { fill: #fff; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cell.dark text { fill: #0f151b; } }
+  .cell.masked rect.bg { fill: var(--line); stroke: var(--line); }
+  .cell.masked text { fill: var(--muted); }
+  .cell.ok rect.bg { fill: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+  .cell.ok text { fill: var(--accent); font-weight: 600; }
+  .sw.ok { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+  .cell.blank rect.bg { fill: var(--panel); stroke-dasharray: 3 3; }
+  .cell.cut rect.bg { fill: color-mix(in srgb, var(--bad) 14%, var(--panel)); stroke: var(--bad); stroke-width: 2; }
+  .cell.cut text { fill: var(--bad); font-weight: 600; }
+  .sw.cut { background: color-mix(in srgb, var(--bad) 14%, var(--panel)); border: 2px solid var(--bad); }
+  .formula { fill: var(--muted); font-size: 12.5px; }
+  .axis { stroke: var(--muted); stroke-width: 1.2; fill: none; }
+  .guide { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 4 4; }
+  .curve { fill: none; stroke: var(--accent); stroke-width: 3; }
+  .curve.flat { stroke: var(--bad); }
+  .dot { fill: var(--warm); }
+  .cell.zero text { fill: var(--muted); opacity: .55; }
+  .gridg { animation: fadein .45s; }
+  .gridg.clickable:hover .gframe { stroke: var(--ink); }
+  .gframe { fill: none; stroke: transparent; stroke-width: 2; }
+  .gridg.hot .gframe { stroke: var(--accent); stroke-width: 2.5; }
+  .region { fill: none; stroke-width: 3; }
+  .region.src { stroke: var(--good); }
+  .region.cross { stroke: var(--warm); }
+  .region.tgt { stroke: var(--purple); }
+  .sw.src { border: 2.5px solid var(--good); background: transparent; }
+  .sw.cross { border: 2.5px solid var(--warm); background: transparent; }
+  .sw.tgt { border: 2.5px solid var(--purple); background: transparent; }
+  .frame { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 2 3; }
+  .divider { stroke: var(--line); stroke-width: 1.5; }
+  .gridg.sel .gframe { stroke: var(--ink); stroke-dasharray: 7 4; }
+  .op { fill: var(--muted); font-family: var(--font-code); font-size: 18px; font-weight: 600; }
+  .bar { fill: var(--line); }
+  .bar.win { fill: var(--accent); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; color: var(--muted); font-size: 13.5px; margin-top: -6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .sw.hot { border: 3px solid var(--accent); background: var(--panel); }
+  .sw.hi { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); border-color: var(--warm); }
+  .sw.heat { background: linear-gradient(90deg, var(--panel), var(--accent)); }
+  .sw.masked { background: var(--line); }
+  .sw.new { background: var(--warm); border-color: var(--warm); }
+  .legend .icon { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--muted); display: inline-grid; place-items: center; font-family: var(--font-code); font-size: 11px; font-weight: 600; }
+
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--ink); border-radius: 14px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .note[hidden] { display: none; }
+  .note-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .note-title { margin: 0; font-family: var(--font-code); font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+  .note-close { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .note-close:hover { border-color: var(--ink); }
+  .note dl { margin: 0; display: grid; grid-template-columns: 8.5em 1fr; gap: 10px 16px; }
+  .note dt { color: var(--muted); font-size: 14px; padding-top: 1px; }
+  .note dd { margin: 0; font-size: 15px; line-height: 1.7; min-width: 0; }
+  .note dd p { margin: 0; }
+  .sample { margin: 0; font-family: var(--font-code); font-size: 12.5px; line-height: 1.55; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow: auto; }
+  .sample-cap { color: var(--muted); font-size: 13.5px; margin-bottom: 4px !important; }
+
+  .caption { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-height: 140px; display: flex; flex-direction: column; gap: 12px; }
+  .caption .say { margin: 0; font-size: 19px; line-height: 1.65; font-weight: 500; max-width: 42em; text-wrap: pretty; }
+  .caption .code { margin: 0; font-family: var(--font-code); font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+  .nav { display: flex; align-items: center; gap: 14px; }
+  .nav button.arrow-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .nav button.arrow-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .nav button.arrow-btn:disabled { opacity: .35; cursor: default; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .dots { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; justify-content: center; }
+  .dots button { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); background: var(--panel); cursor: pointer; }
+  .dots button.done { background: var(--line); }
+  .dots button.now { background: var(--accent); border-color: var(--accent); transform: scale(1.25); }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; min-width: 3.5em; text-align: right; flex: none; }
+
+  @media (min-width: 700px) {
+    .nav button.arrow-btn { position: fixed; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+    .nav .prev { left: 8px; }
+    .nav .next { right: 8px; }
+    .view { padding-inline: 64px; }
+  }
+  @media (min-width: 1200px) {
+    .view { padding-inline: 0; }
+    .nav .prev { left: calc(50% - 592px); }
+    .nav .next { right: calc(50% - 592px); }
+  }
+  @media (max-width: 640px) { .note dl { grid-template-columns: 1fr; gap: 2px 0; } .note dd { margin-bottom: 8px; } }
+  @media (prefers-reduced-motion: reduce) { .node, .link, .linklabel, .gridg, .chip.new rect { transition: none; animation: none; } }
+
+  .tabs { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 14px 16px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .tab { font-family: var(--font-body); font-size: 14px; padding: 7px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .tab:hover { border-color: var(--accent); }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0f151b; } }
+</style>
+</head>
+<body>
+<nav class="tabs" role="tablist" aria-label="切换页面">
+  <button class="tab" role="tab" id="tab-overview" aria-selected="true">整体：PPO 一步训练</button>
+  <button class="tab" role="tab" id="tab-reward" aria-selected="false">奖励怎么落到每个 token 上</button>
+  <button class="tab" role="tab" id="tab-advantage" aria-selected="false">优势怎么算</button>
+  <button class="tab" role="tab" id="tab-update" aria-selected="false">策略怎么更新</button>
+</nav>
+<div class="wrap">
+<div class="view" id="o-view">
+  <h1>PPO 一步训练：Countdown 题 [42, 32, 5] → 50</h1>
+  <p class="gist">本质上是，策略模型先自己写一个回答，判分后把分数落到每个 token 上，比价值模型预计得好的 token 被调得更容易写出来、差的更不容易，而且每次只许改一小步。</p>
+  <div class="legend" id="o-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="o-diagram" viewBox="0 0 1000 560" role="group" aria-label="PPO 一步训练：Countdown 题 [42, 32, 5] → 50">
+      <defs><marker id="o-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="o-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="o-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="o-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="o-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="o-noteTitle"></h2>
+      <button class="note-close" id="o-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="o-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="o-say"></p>
+    <p class="code" id="o-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="o-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="o-dots"></div>
+    <span class="count" id="o-count"></span>
+    <button class="arrow-btn next" id="o-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="b-view" hidden>
+  <h1>奖励怎么落到每个 token 上：KL 惩罚加判分</h1>
+  <p class="gist">本质上是，回答写完才能判分，所以判分只记在最后一个 token 上；每个 token 再按策略模型离参考模型多远扣一点分。</p>
+  <div class="legend" id="b-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="b-diagram" viewBox="0 0 1000 430" role="group" aria-label="奖励怎么落到每个 token 上：KL 惩罚加判分">
+      <defs><marker id="b-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="b-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="b-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="b-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="b-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="b-noteTitle"></h2>
+      <button class="note-close" id="b-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="b-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="b-say"></p>
+    <p class="code" id="b-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="b-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="b-dots"></div>
+    <span class="count" id="b-count"></span>
+    <button class="arrow-btn next" id="b-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="c-view" hidden>
+  <h1>优势怎么算：价值模型和 GAE</h1>
+  <p class="gist">本质上是，价值模型在写每个 token 之前先预计一个分，写完这个 token 后，拿到的加上新的预计比原来的预计多出多少，就是这个 token 的功劳；把后面几个 token 的功劳打折加进来，就是优势。</p>
+  <div class="legend" id="c-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="c-diagram" viewBox="0 0 1000 520" role="group" aria-label="优势怎么算：价值模型和 GAE">
+      <defs><marker id="c-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="c-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="c-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="c-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="c-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="c-noteTitle"></h2>
+      <button class="note-close" id="c-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="c-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="c-say"></p>
+    <p class="code" id="c-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="c-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="c-dots"></div>
+    <span class="count" id="c-count"></span>
+    <button class="arrow-btn next" id="c-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="u-view" hidden>
+  <h1>策略怎么更新：比率和截断</h1>
+  <p class="gist">本质上是，拿现在的策略模型和写回答时的策略模型比，同一个 token 的概率变成了几倍；按优势把这个倍数往有利方向推，但倍数一超出 0.8 到 1.2 就不再推。</p>
+  <div class="legend" id="u-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="u-diagram" viewBox="0 0 1000 640" role="group" aria-label="策略怎么更新：比率和截断">
+      <defs><marker id="u-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="u-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="u-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="u-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="u-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="u-noteTitle"></h2>
+      <button class="note-close" id="u-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="u-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="u-say"></p>
+    <p class="code" id="u-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="u-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="u-dots"></div>
+    <span class="count" id="u-count"></span>
+    <button class="arrow-btn next" id="u-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</div>
+<script>
+var D = {"tok": ["(42", " -", " 32)", " *", " 5"], "old": [-1.1, -0.3, -0.9, -0.4, -0.2], "ref": [-1.3, -0.4, -0.7, -0.6, -0.3], "prob0": 0.33, "diff": [0.2, 0.1, -0.2, 0.2, 0.1], "pen": [-0.01, -0.005, 0.01, -0.01, -0.005], "r": [-0.01, -0.005, 0.01, -0.01, 0.995], "V": [0.4, 0.45, 0.55, 0.6, 0.7], "Vn": [0.45, 0.55, 0.6, 0.7, 0.0], "delta": [0.04, 0.095, 0.06, 0.09, 0.295], "A": [0.502, 0.486, 0.412, 0.37, 0.295], "R": [0.902, 0.936, 0.962, 0.97, 0.995], "new": [-0.85, -0.25, -0.88, -0.36, -0.18], "ratio": [1.284, 1.051, 1.02, 1.041, 1.02], "rc": [1.2, 1.051, 1.02, 1.041, 1.02], "s1": [0.644, 0.511, 0.42, 0.385, 0.301], "s2": [0.602, 0.511, 0.42, 0.385, 0.301], "mn": [0.602, 0.511, 0.42, 0.385, 0.301], "pg": -0.4439, "Vnew": [0.55, 0.6, 0.7, 0.8, 0.95], "Vc": [0.55, 0.6, 0.7, 0.8, 0.9], "l1": [0.1238, 0.113, 0.0685, 0.029, 0.002], "l2": [0.1238, 0.113, 0.0685, 0.029, 0.009], "vf": 0.03433, "loss": -0.4405, "G": [0.98, 0.99, 0.995, 0.985, 0.995], "GV": [0.58, 0.54, 0.445, 0.385, 0.295], "pOld": [0.33, 0.74, 0.41, 0.67, 0.82], "pRef": [0.27, 0.67, 0.5, 0.55, 0.74], "pRatio": [1.22, 1.11, 0.82, 1.22, 1.11], "score0": [0, 0, 0, 0, 1]};
+var SVGNS = "http://www.w3.org/2000/svg";
+function fmt(v, d) {
+  if (typeof v === "string") return v;
+  if (v === null) return "−∞";
+  d = d === undefined ? 2 : d;
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) return (0).toFixed(d);
+  return (v < 0 ? "−" : "") + Math.abs(v).toFixed(d);
+}
+function vec(row) { return "(" + row.map(fmt).join(", ") + ")"; }
+function col(M, a, b) { return M.map(function (r) { return r.slice(a, b); }); }
+
+/* 一个页面：顶部 h1 和一句话，中间 SVG，点框看说明，下面是这一步的说明和代码，最下面翻页 */
+function makeView(cfg) {
+  var P = cfg.P;
+  var $ = function (id) { return document.getElementById(P + id); };
+  var selected = null, cur = 0;
+
+  function mk(tag, attrs, parent, text) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+  function clickable(g, id) {
+    g.classList.add("clickable");
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button");
+    g.setAttribute("aria-label", cfg.notes[id].title + "，点击查看说明");
+    g.setAttribute("data-id", id);
+    if (id === selected) g.classList.add("sel");
+    g.addEventListener("click", function () { choose(id); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(id); } });
+  }
+  function info(g, cx, cy) {
+    var ic = mk("g", { "class": "info" }, g);
+    mk("circle", { cx: cx, cy: cy, r: 9 }, ic);
+    mk("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, ic, "i");
+  }
+  /* 框：id、x、y、宽、高、标题、小字；s.on 里有它就亮，s.hot 里有它就描蓝边 */
+  function box(root, s, id, x, y, w, h, title, sub, opt) {
+    opt = opt || {};
+    var g = mk("g", { "class": "node" + (s.on.indexOf(id) >= 0 ? " on" : "") + (s.hot.indexOf(id) >= 0 ? " hot" : "") + (opt.proc ? " proc" : "") }, root);
+    if (opt.ghost) g.classList.add("ghost");
+    if (opt.stack) {
+      mk("rect", { "class": "stack", x: x + 10, y: y - 10, width: w, height: h, rx: 10 }, g);
+      mk("rect", { "class": "stack", x: x + 5, y: y - 5, width: w, height: h, rx: 10 }, g);
+    }
+    mk("rect", { "class": "box", x: x, y: y, width: w, height: h, rx: 10 }, g);
+    var oneLine = !sub;
+    mk("text", { "class": opt.cn ? "titlecn" : "title", x: x + 14, y: oneLine ? y + h / 2 + 5 : y + 24 }, g, title);
+    if (sub) mk("text", { "class": "sub", x: x + 14, y: y + 44 }, g, sub);
+    info(g, x + w - 18, oneLine ? y + h / 2 : y + 20);
+    clickable(g, id);
+    return g;
+  }
+  function chip(root, x, y, text, kind) {
+    var w = Math.max(34, text.replace(/[^\x00-\xff]/g, "xx").length * 8 + 18);
+    var g = mk("g", { "class": "chip" + (kind ? " " + kind : "") }, root);
+    mk("rect", { x: x, y: y, width: w, height: 26, rx: 6 }, g);
+    mk("text", { x: x + w / 2, y: y + 18, "text-anchor": "middle" }, g, text);
+    return w;
+  }
+  /* 数字网格：o.rows 行名、o.cols 列名、o.hiRow 跟着看的那一行、o.heat 按数值深浅上色（0–1）、o.zero 把 0 变淡 */
+  function grid(root, x, y, M, o) {
+    o = o || {};
+    var cw = o.cw || 52, ch = 28;
+    var g = mk("g", { "class": "gridg" + (o.hot ? " hot" : "") }, root);
+    var top = y;
+    if (o.title) { mk("text", { "class": "gtitle", x: x, y: y + 13 }, g, o.title); top += 22; }
+    if (o.cols) {
+      o.cols.forEach(function (c, j) { mk("text", { "class": "glabel", x: x + j * cw + cw / 2, y: top + 12, "text-anchor": "middle" }, g, c); });
+      top += 18;
+    }
+    M.forEach(function (row, i) {
+      if (o.rows) mk("text", { "class": "glabel", x: x - 8, y: top + i * ch + 19, "text-anchor": "end" }, g, o.rows[i]);
+      row.forEach(function (v, j) {
+        var hiCell = (o.hiCells && o.hiCells.some(function (c) { return c[0] === i && c[1] === j; })) || (o.hiRow === i) || (o.hiRows && o.hiRows.indexOf(i) >= 0) || (o.hiCols && o.hiCols.indexOf(j) >= 0) || (o.hiAll);
+        var cls = "cell" + (hiCell ? " hi" : "") + (v === null ? " masked" : "") + (v === "✓" ? " ok" : "") + (v === "" ? " blank" : "") + (o.cut && o.cut.some(function (c) { return c[0] === i && c[1] === j; }) ? " cut" : "") + (o.zero && v === 0 ? " zero" : "") + (o.heat && v !== null && v > 0.55 ? " dark" : "");
+        var cg = mk("g", { "class": cls }, g);
+        mk("rect", { "class": "bg", x: x + j * cw, y: top + i * ch, width: cw, height: ch }, cg);
+        if (o.heat && v !== null) mk("rect", { "class": "heat", x: x + j * cw + 1, y: top + i * ch + 1, width: cw - 2, height: ch - 2, "fill-opacity": Math.min(1, v * 0.95) }, cg);
+        mk("text", { x: x + j * cw + cw / 2, y: top + i * ch + 18.5, "text-anchor": "middle" }, cg, fmt(v, o.digRows ? o.digRows[i] : o.dig));
+      });
+    });
+    var w = M[0].length * cw, hgt = top - y + M.length * ch;
+    if (o.id) {
+      mk("rect", { "class": "gframe", x: x - (o.rows ? 52 : 6), y: y - 6, width: w + (o.rows ? 58 : 12), height: hgt + 12, rx: 8 }, g);
+      g.insertBefore(g.lastChild, g.firstChild);
+      if (o.title) { var tw = o.title.replace(/[^\x00-\xff]/g, "xx").length * 6.6; info(g, Math.max(x + w - 6, x + tw + 14), y + 9); }
+      clickable(g, o.id);
+    }
+    return { w: w, h: hgt, bottom: y + hgt, right: x + w };
+  }
+  function arrow(root, d, cls) { return mk("path", { "class": "link" + (cls ? " " + cls : ""), d: d, "marker-end": "url(#" + P + (cls === "back" ? "headm" : cls === "warm" ? "headw" : "head") + ")" }, root); }
+  function label(root, x, y, text, cls, anchor) { return mk("text", { "class": "linklabel" + (cls ? " " + cls : ""), x: x, y: y, "text-anchor": anchor || "start" }, root, text); }
+  var api = { mk: mk, box: box, chip: chip, grid: grid, arrow: arrow, label: label };
+
+  function renderNote(id) {
+    var n = cfg.notes[id];
+    $("noteTitle").textContent = n.title;
+    var dl = $("noteRows"); dl.textContent = "";
+    n.rows.forEach(function (row) {
+      var dt = document.createElement("dt"); dt.textContent = row[0];
+      var dd = document.createElement("dd"); var v = row[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else {
+        if (v.cap) { var pc = document.createElement("p"); pc.className = "sample-cap"; pc.textContent = v.cap; dd.appendChild(pc); }
+        var pre = document.createElement("pre"); pre.className = "sample"; pre.textContent = v.pre; dd.appendChild(pre);
+      }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    document.querySelectorAll("#" + P + "diagram [data-id]").forEach(function (g) { g.classList.toggle("sel", g.getAttribute("data-id") === selected); });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+
+  function show(i) {
+    cur = Math.max(0, Math.min(cfg.steps.length - 1, i));
+    var s = cfg.steps[cur];
+    s.on = s.on || []; s.hot = s.hot || [];
+    var root = $("draw"); root.textContent = "";
+    cfg.draw(api, root, s);
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + cfg.steps.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === cfg.steps.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash(cfg.key, cur + 1);
+  }
+  cfg.steps.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 步");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+  var lg = $("legend");
+  cfg.legend.forEach(function (it) {
+    var s = document.createElement("span");
+    var sw = document.createElement("i");
+    if (it[0] === "info") { sw.className = "icon"; sw.textContent = "i"; } else sw.className = "sw " + it[0];
+    s.appendChild(sw); s.appendChild(document.createTextNode(it[1])); lg.appendChild(s);
+  });
+  show(0);
+  window.__v = window.__v || {};
+  window.__v[cfg.key] = { show: show, cur: function () { return cur; } };
+}
+</script>
+<script>
+/* 每页共用：表头的 token、一行数字 */
+var TOK = D.tok.map(function (t) { return t.trim(); });
+function chipW(t) { return Math.max(34, t.replace(/[^\x00-\xff]/g, "xx").length * 8 + 18); }
+/* 在每一列正中画一个 token；show 为 false 时画空的虚线格 */
+function tokRow(A, root, x0, y, cw, show) {
+  TOK.forEach(function (t, j) {
+    var cx = x0 + j * cw + cw / 2;
+    if (show) A.chip(root, cx - chipW(t) / 2, y, t, "found");
+    else A.chip(root, cx - 22, y, " ", "empty");
+  });
+}
+/* 一行数字：label 是行名，vals 里 "" 是空格子 */
+function numRow(A, root, x0, y, cw, label, vals, o) {
+  o = o || {};
+  return A.grid(root, x0, y, [vals], { rows: [label], cw: cw, dig: o.dig === undefined ? 3 : o.dig, hiRow: o.hi ? 0 : undefined, hiCells: (o.hiCols || []).map(function (j) { return [0, j]; }), cut: (o.cut || []).map(function (j) { return [0, j]; }), id: o.id });
+}
+function blanks(n) { var a = []; for (var i = 0; i < n; i++) a.push(""); return a; }
+function partial(vals, cols) { return vals.map(function (v, j) { return cols.indexOf(j) >= 0 ? v : ""; }); }
+
+/* ===== 第 1 页：PPO 一步训练的全过程 ===== */
+(function () {
+  var MX = 20, MW = 330, TX = 560, CW = 84;
+  var MY = { q: 20, pol: 100, ref: 180, rew: 260, val: 340 };
+  var RY = { old: 116, ref: 196, r: 276, V: 356, A: 436, R: 506 };   // 每一行的上边，和左边的框对齐
+
+  function draw(A, root, s) {
+    var st = s.stage;
+    var S = { on: ["q", "pol", "ref", "rew", "val"], hot: s.hot || [] };
+    var g = A.box(root, S, "q", MX, MY.q, MW, 60, "题目：[42, 32, 5] → 50", "用 + − × ÷ 把 3 个数字各用一次，算出 50", {});
+    A.box(root, S, "pol", MX, MY.pol, MW, 60, "策略模型", "正在训练；写回答", { cn: true, proc: true });
+    A.box(root, S, "ref", MX, MY.ref, MW, 60, "参考模型", "策略模型训练前的拷贝，不更新", { cn: true, proc: true });
+    A.box(root, S, "rew", MX, MY.rew, MW, 60, "奖励函数", "答对判 1 分，答错判 0 分", { cn: true });
+    A.box(root, S, "val", MX, MY.val, MW, 60, "价值模型", "正在训练；给每个 token 预计价值 V", { cn: true, proc: true });
+
+    A.mk("text", { "class": "colhead", x: TX - 100, y: 26 }, root, "策略模型写出的回答，切成 5 个 token");
+    tokRow(A, root, TX, 40, CW, st >= 2);
+    var rows = [
+      ["old", "旧 logp", D.old, 2, 2],
+      ["ref", "参考 logp", D.ref, 2, 4],
+      ["r", "奖励 r", D.r, 3, 5],
+      ["V", "价值 V", D.V, 2, 6],
+      ["A", "优势 A", D.A, 3, 7],
+      ["R", "回报", D.R, 3, 9]
+    ];
+    rows.forEach(function (r) {
+      var vals = st >= r[4] ? r[2] : blanks(5);
+      if (r[0] === "r") vals = st < 3 ? blanks(5) : st < 5 ? ["", "", "", "", "+1 判分"] : D.r;
+      numRow(A, root, TX, RY[r[0]], CW, r[1], vals, { dig: r[3], hi: s.hotRow === r[0], id: "row_" + r[0] });
+    });
+
+    var a = s.arrows || [];
+    function h(y) { return "M" + (MX + MW + 2) + " " + y + " H" + (TX - 92); }
+    if (a.indexOf("write") >= 0) { A.arrow(root, "M" + (MX + MW + 2) + " " + (MY.pol + 20) + " H400 V53 H" + (TX - 6)); A.arrow(root, h(MY.pol + 40)); }
+    if (a.indexOf("ref") >= 0) A.arrow(root, h(MY.ref + 30));
+    if (a.indexOf("rew") >= 0) A.arrow(root, h(MY.rew + 30));
+    if (a.indexOf("val") >= 0) A.arrow(root, h(MY.val + 30));
+    if (a.indexOf("updPol") >= 0) { A.arrow(root, "M" + (TX - 92) + " " + (RY.A + 14) + " H400 V" + (MY.pol + 44) + " H" + (MX + MW + 4), "warm"); A.label(root, 408, RY.A + 6, "按优势更新", "warm"); }
+    if (a.indexOf("updVal") >= 0) { A.arrow(root, "M" + (TX - 92) + " " + (RY.R + 14) + " H400 V" + (MY.val + 44) + " H" + (MX + MW + 4), "warm"); A.label(root, 408, RY.R + 6, "按回报更新", "warm"); }
+    if (st === 10) A.label(root, MX, 440, "同一批回答用 4 遍，然后重新写回答", "warm");
+  }
+
+  var STEPS = [
+    { stage: 1, hot: ["q"],
+      say: "这一页跟着 Countdown 的一道题走一遍 PPO 的一步训练。题目给出 3 个数字 42、32、5 和目标数 50，要求用 + − × ÷ 把每个数字恰好用一次，算出 50。PPO 要做的事是：让策略模型以后更常写出答对的回答。",
+      code: "prompt = \"Using the numbers [42, 32, 5], create an equation that equals 50. ...\"" },
+    { stage: 2, hot: ["pol"], hotRow: "old", arrows: ["write"],
+      say: "策略模型读题目，一个 token 一个 token 地写出回答“(42 - 32) * 5”，例子把它切成 5 个 token。策略模型写每个 token 时，同时记下这个 token 的 logp：logp 是策略模型给这个 token 的概率取对数，例如第 1 个 token 的概率是 " + D.prob0.toFixed(2) + "，logp 是 " + fmt(D.old[0]) + "。这一行叫旧 logp，后面更新策略模型时，用它当比较的起点。",
+      code: "query_response, logits = generate(policy, queries)\nlogprobs = selective_log_softmax(logits, response)   # 旧 logp，每个 token 一个数" },
+    { stage: 3, hot: ["rew"], hotRow: "r", arrows: ["rew"],
+      say: "奖励函数检查整个回答：3 个数字各用了一次，(42 − 32) × 5 等于 50，所以判分是 1；答错是 0。判分只有一个数，奖励函数把它给整个回答，表里先记在最后一个 token 上。",
+      code: "scores = reward_countdown(completion, nums=[42, 32, 5], target=50)   # → 1.0" },
+    { stage: 4, hot: ["ref"], hotRow: "ref", arrows: ["ref"],
+      say: "参考模型是训练开始前策略模型的一份拷贝，整个训练中不更新。参考模型给同一个回答的每个 token 也算一个 logp，这一行叫参考 logp。旧 logp 减参考 logp，表示策略模型在这个 token 上已经离开参考模型多远。",
+      code: "ref_logprobs = selective_log_softmax(ref_policy(query_response).logits, response)" },
+    { stage: 5, hot: ["rew", "ref"], hotRow: "r",
+      say: "每个 token 的奖励 r 由两部分加起来：第一部分是 KL 惩罚，每个 token 都有，等于 −0.05 ×（旧 logp − 参考 logp）；第二部分是判分，只加在最后一个 token 上。最后一个 token 的奖励是 " + fmt(D.pen[4], 3) + " + 1 = " + fmt(D.r[4], 3) + "。“奖励怎么落到每个 token 上”那一页逐步算这一行。",
+      code: "kl = logprobs - ref_logprobs\nnon_score_reward = -kl_coef * kl   # kl_coef = 0.05\nrewards = non_score_reward; rewards[最后一个 token] += scores" },
+    { stage: 6, hot: ["val"], hotRow: "V", arrows: ["val"],
+      say: "价值模型读题目和已经写出的 token，给每个 token 预计一个价值 V：写这个 token 之前，预计从这里往后一共还能拿到多少奖励。例如开始写第 1 个 token 之前，V 是 " + fmt(D.V[0]) + "。价值模型也在训练，它预计得越准，下一步算出的优势越准。",
+      code: "values = value_model(query_response)   # 每个 token 一个价值" },
+    { stage: 7, hot: ["val"], hotRow: "A",
+      say: "用奖励 r 和价值 V 算出每个 token 的优势 A：写这个 token 让结果比价值模型预计的好多少。这个回答答对了，5 个 token 的优势都是正数，第 1 个 token 的优势是 " + fmt(D.A[0], 3) + "。“优势怎么算”那一页逐步算这一行。",
+      code: "advantages = GAE(rewards, values, gamma=1.0, lam=0.95)" },
+    { stage: 8, hot: ["pol"], hotRow: "A", arrows: ["updPol"],
+      say: "策略模型按优势更新：优势为正的 token，更新后策略模型给它的 logp 变大，下次更容易写出来；优势为负的 token，logp 变小。PPO 用新 logp 和旧 logp 的比率限制每次改多少：比率超出 0.8 到 1.2 后，就不再往同一个方向改。“策略怎么更新”那一页逐步算。",
+      code: "ratio = torch.exp(new_logprobs - logprobs)\npg_loss = max(-advantages * ratio, -advantages * torch.clamp(ratio, 0.8, 1.2))" },
+    { stage: 9, hot: ["val"], hotRow: "R", arrows: ["updVal"],
+      say: "回报 = 优势 A + 价值 V，是这次实际算出的价值。价值模型按回报更新：把自己预计的 V 往回报拉近。例如第 1 个 token 的 V 是 " + fmt(D.V[0]) + "，回报是 " + fmt(D.R[0], 3) + "，价值模型下次会预计得高一些。",
+      code: "returns = advantages + values\nvf_loss = 0.5 * (vpred - returns) ** 2" },
+    { stage: 10, hot: ["pol", "val"], arrows: ["updPol", "updVal"],
+      say: "同一批回答被反复用 4 遍（num_ppo_epochs = 4），每一遍切成几个小批次，每个小批次更新一次策略模型和价值模型。4 遍用完后，更新过的策略模型重新给新的题目写回答，开始下一步训练；旧 logp、奖励、价值、优势全部重新算。",
+      code: "for ppo_epoch in range(4):\n    for minibatch in batch:\n        loss = pg_loss + vf_coef * vf_loss   # vf_coef = 0.1\n        loss.backward(); optimizer.step()" }
+  ];
+
+  function n(title, rows) { return { title: title, rows: rows }; }
+  var NOTES = {
+    q: n("题目", [["是什么", "Countdown 题：3 个数字和一个目标数，用 + − × ÷ 把每个数字恰好用一次，算出目标数。"], ["例子", "[42, 32, 5] → 50，一个对的回答是 (42 − 32) × 5。"]]),
+    pol: n("策略模型", [
+      ["是什么", "正在训练的语言模型。它写回答，PPO 更新的也是它。"],
+      ["产出", "写回答时给每个 token 记下旧 logp；更新时再给同一个回答算新 logp。"] ]),
+    ref: n("参考模型", [
+      ["是什么", "训练开始前策略模型的一份拷贝，整个训练中不更新。"],
+      ["用途", "给每个 token 算参考 logp。旧 logp − 参考 logp 越大，KL 惩罚扣得越多，这样策略模型不会为了拿判分离参考模型太远。"] ]),
+    rew: n("奖励函数", [
+      ["是什么", "检查整个回答的规则：3 个数字各用一次、算式等于目标数，判 1 分，否则判 0 分。"],
+      ["换成奖励模型", "RLHF 里没有这种规则，就用一个打分的神经网络（奖励模型）给整个回答打一个分，后面的算法不变。"] ]),
+    val: n("价值模型", [
+      ["是什么", "另一个神经网络，读题目和已经写出的 token，给每个 token 输出一个数：写这个 token 之前，预计从这里往后一共还能拿到多少奖励。"],
+      ["怎么训练", "把每个 token 的 V 往这次算出的回报拉近。"],
+      ["和 GRPO 的区别", "GRPO 不用价值模型：它让同一道题写一组回答，用这组回答的平均判分当比较的基准。"] ]),
+    row_old: n("旧 logp", [["是什么", "写回答时策略模型给每个 token 的概率取对数。概率 0.33 对应 logp −1.10，概率越大 logp 越接近 0。"], ["谁写、谁读", "写回答时记下；KL 惩罚和比率都要用它。这一批回答用完 4 遍之前，旧 logp 不变。"]]),
+    row_ref: n("参考 logp", [["是什么", "参考模型给同一个回答每个 token 的概率取对数。"]]),
+    row_r: n("奖励 r", [["是什么", "每个 token 的奖励 = KL 惩罚 +（只有最后一个 token）判分。"]]),
+    row_V: n("价值 V", [["是什么", "价值模型在写这个 token 之前的预计：从这里往后一共还能拿到多少奖励。"]]),
+    row_A: n("优势 A", [["是什么", "写这个 token 让结果比价值模型预计的好多少。正数表示变好，负数表示变差。"]]),
+    row_R: n("回报", [["是什么", "优势 A + 价值 V。价值模型把 V 往这个数拉近。"]])
+  };
+
+  makeView({ P: "o-", key: "overview", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hot", "这一步讲到的部分"], ["hi", "这一步算出的那一行"], ["info", "点框或行看说明"]] });
+})();
+
+/* ===== 第 2 页：奖励怎么落到每个 token 上 ===== */
+(function () {
+  var TX = 250, CW = 116, FX = 845, RH = 42;
+  var ROWS = {
+    score: ["只看判分的奖励", D.score0, 0, "写完才判，记在最后"],
+    pOld: ["策略模型给的概率", D.pOld, 2, "写回答时"],
+    old: ["旧 logp", D.old, 2, "= ln(策略模型给的概率)"],
+    pRef: ["参考模型给的概率", D.pRef, 2, "参考模型不更新"],
+    ref: ["参考 logp", D.ref, 2, "= ln(参考模型给的概率)"],
+    diff: ["旧 logp − 参考 logp", D.diff, 2, "= ln(两个概率之比)"],
+    pen: ["KL 惩罚", D.pen, 3, "= −0.05 × 上一行"],
+    r: ["奖励 r", D.r, 3, "= KL 惩罚 + 判分"]
+  };
+
+  function draw(A, root, s) {
+    tokRow(A, root, TX, 20, CW, true);
+    // 写回答的时间顺序
+    A.mk("path", { "class": "link back", d: "M" + (TX + 20) + " 60 H" + (TX + 5 * CW - 20), "marker-end": "url(#b-headm)" }, root);
+    A.mk("text", { "class": "sub", x: TX + 20, y: 76 }, root, "策略模型从左往右一个一个写");
+    if (s.judge) A.label(root, TX + 5 * CW + 8, 40, "写完 → 奖励函数判分：1", "warm");
+    var y = 92;
+    s.rows.forEach(function (k, i) {
+      var r = ROWS[k];
+      var o = { dig: r[2], id: "b_" + k };
+      if (k === s.hot) { if (s.hiCols) o.hiCols = s.hiCols; else o.hi = true; }
+      numRow(A, root, TX, y, CW, r[0], r[1], o);
+      A.mk("text", { "class": "formula", x: FX, y: y + 19 }, root, r[3]);
+      y += RH;
+    });
+  }
+
+  var STEPS = [
+    { rows: ["score"], hot: "score", judge: true,
+      say: "策略模型从左往右一个一个地写 token。写完第 1 到第 4 个 token 时，回答还没写完，奖励函数没法判对错；写完第 5 个 token，回答完整了，奖励函数才判分：答对，判 1。所以只看判分的话，每个 token 的奖励是 0、0、0、0、1：判分只记在最后一个 token 上。",
+      code: "scores = reward_countdown(\"(42 - 32) * 5\", nums=[42, 32, 5], target=50)   # 1.0，整个回答只有这一个数" },
+    { rows: ["score", "pOld", "old"], hot: "old",
+      say: "只看判分有一个风险：策略模型可能学会一些离原来的样子很远、但碰巧能拿分的写法。PPO 用 logp 衡量“离原来多远”。策略模型写每个 token 时，会给词表里每个 token 一个概率，被写出来的那个 token 的概率取自然对数就是 logp。例如写第 1 个 token 时，策略模型给“(42”的概率是 " + D.pOld[0].toFixed(2) + "，ln(" + D.pOld[0].toFixed(2) + ") = " + fmt(D.old[0]) + "，这就是旧 logp。",
+      code: "logprobs = log_softmax(logits)[被写出来的 token]   # 旧 logp，每个 token 一个数" },
+    { rows: ["score", "pOld", "old", "pRef", "ref"], hot: "ref",
+      say: "参考模型是训练开始前策略模型的一份拷贝，训练中不更新，它代表“原来的样子”。参考模型读同一个题目和同一个回答，也给这 5 个 token 各算一个概率：给“(42”的概率是 " + D.pRef[0].toFixed(2) + "，取对数得到参考 logp " + fmt(D.ref[0]) + "。",
+      code: "ref_logprobs = log_softmax(ref_policy(query_response).logits)[被写出来的 token]" },
+    { rows: ["score", "pOld", "old", "pRef", "ref", "diff"], hot: "diff",
+      say: "每个 token 用旧 logp 减参考 logp。两个对数相减等于两个概率之比取对数：第 1 个 token 是 ln(" + D.pOld[0].toFixed(2) + " ÷ " + D.pRef[0].toFixed(2) + ") = " + fmt(D.diff[0]) + "，策略模型给这个 token 的概率是参考模型的 " + D.pRatio[0].toFixed(2) + " 倍。差是正数，说明策略模型比原来更爱写这个 token；差是负数，说明更不爱写。",
+      code: "kl = logprobs - ref_logprobs   # = ln(策略模型给的概率 / 参考模型给的概率)" },
+    { rows: ["score", "pOld", "old", "pRef", "ref", "diff", "pen"], hot: "pen",
+      say: "KL 惩罚 = −0.05 ×（旧 logp − 参考 logp），0.05 是 kl_coef。第 1 个 token 的差是 " + fmt(D.diff[0]) + "，KL 惩罚是 −0.05 × " + fmt(D.diff[0]) + " = " + fmt(D.pen[0], 3) + "：策略模型在这个 token 上离原来远了一些，扣 0.010。每个 token 都按这样扣分，策略模型离参考模型越远，拿到的奖励越少。",
+      code: "non_score_reward = -kl_coef * kl   # kl_coef = 0.05" },
+    { rows: ["score", "pOld", "old", "pRef", "ref", "diff", "pen"], hot: "pen", hiCols: [2],
+      say: "第 3 个 token 的差是 " + fmt(D.diff[2]) + "：策略模型给它的概率比参考模型小，所以 KL 惩罚是 +0.010，这个 token 反而加分。单个 token 上的差可以是负数；但把策略模型所有可能写出的回答都算一遍再取平均，平均的差等于两个模型之间的 KL 散度，不会小于 0。所以平均下来，KL 惩罚总是在扣分。",
+      code: "# 单个 token：kl 可正可负\n# 对策略模型写出的所有回答取平均：E[kl] = KL(策略模型 ‖ 参考模型) ≥ 0" },
+    { rows: ["score", "pOld", "old", "pRef", "ref", "diff", "pen", "r"], hot: "r",
+      say: "每个 token 的奖励 r = KL 惩罚 + 只看判分的奖励。前 4 个 token 的判分部分是 0，奖励就是 KL 惩罚；第 5 个 token 是 " + fmt(D.pen[4], 3) + " + 1 = " + fmt(D.r[4], 3) + "。下一页“优势怎么算”用这一行奖励 r。",
+      code: "rewards = non_score_reward.clone()\nrewards[actual_end] += scores   # actual_end 是最后一个 token 的位置" }
+  ];
+
+  function n(title, rows) { return { title: title, rows: rows }; }
+  var NOTES = {
+    b_score: n("只看判分的奖励", [["是什么", "奖励函数给整个回答一个判分（答对 1，答错 0），记在最后一个 token 上，其余 token 记 0。"], ["为什么记在最后", "回答写完以后奖励函数才能判对错。"]]),
+    b_pOld: n("策略模型给的概率", [["是什么", "写回答时，策略模型给每个被写出来的 token 的概率。"]]),
+    b_old: n("旧 logp", [["是什么", "策略模型给的概率取自然对数。概率越大，logp 越接近 0。"], ["为什么叫旧", "它是写回答时的策略模型算的；更新开始以后策略模型会变，那时重新算的叫新 logp。"]]),
+    b_pRef: n("参考模型给的概率", [["是什么", "参考模型给同一个回答每个 token 的概率。参考模型是训练开始前策略模型的拷贝，不更新。"]]),
+    b_ref: n("参考 logp", [["是什么", "参考模型给的概率取自然对数。"]]),
+    b_diff: n("旧 logp − 参考 logp", [["是什么", "ln(策略模型给的概率 ÷ 参考模型给的概率)。TRL 的代码里叫 kl。"], ["正负", "正数：策略模型比参考模型更爱写这个 token；负数：更不爱写。"]]),
+    b_pen: n("KL 惩罚", [["是什么", "−kl_coef ×（旧 logp − 参考 logp），kl_coef 在 TRL 里默认 0.05。"], ["作用", "策略模型离参考模型越远，拿到的奖励越少，这样它不会为了拿判分把写法改得面目全非。"]]),
+    b_r: n("奖励 r", [["是什么", "每个 token 的奖励 = KL 惩罚 + 只看判分的奖励。"], ["谁用", "“优势怎么算”那一页。"]])
+  };
+
+  makeView({ P: "b-", key: "reward", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hi", "这一步算出的数"], ["info", "点行看说明"]] });
+})();
+
+/* ===== 第 3 页：优势怎么算 ===== */
+(function () {
+  var TX = 200, CW = 150, RH = 40;
+  var MX = function (k) { return TX + k * CW; };          // 第 k 个时刻的位置：k = 0 开始写之前，k = 1..5 写完第 k 个 token
+  var BASE = 196, SCALE = 130;
+  var VV = D.V.concat([0]);                                 // 6 个时刻的价值预计，最后一个时刻回答已结束，记 0
+  var MOMENT = ["开始写之前", "写完第 1 个", "写完第 2 个", "写完第 3 个", "写完第 4 个", "写完第 5 个"];
+  var ROWS = {
+    r: ["奖励 r", D.r, 3],
+    G: ["往后奖励总和", D.G, 3],
+    V: ["价值 V（写之前的预计）", D.V, 2],
+    GV: ["往后奖励总和 − V", D.GV, 3],
+    d: ["δ", D.delta, 3],
+    A: ["优势 A", D.A, 3],
+    R: ["回报 = A + V", D.R, 3]
+  };
+
+  function timeline(A, root, s) {
+    // token 和每个 token 的奖励
+    TOK.forEach(function (t, j) {
+      var cx = MX(j) + CW / 2, w = chipW(t);
+      var on = s.hiT && s.hiT.indexOf(j) >= 0;
+      A.chip(root, cx - w / 2, 18, t, on ? "new" : "found");
+      A.mk("text", { "class": "glabel", x: cx, y: 62, "text-anchor": "middle" }, root, "r = " + fmt(D.r[j], 3));
+      A.mk("path", { "class": "link back", d: "M" + (MX(j) + 10) + " 31 H" + (cx - w / 2 - 4) }, root);
+    });
+    for (var k = 0; k < 6; k++) {
+      A.mk("text", { "class": "sub", x: MX(k), y: BASE + 18, "text-anchor": "middle" }, root, MOMENT[k]);
+      A.mk("circle", { cx: MX(k), cy: 31, r: 4, fill: "var(--muted)" }, root);
+      if (!s.bars) continue;
+      var h = VV[k] * SCALE, on = s.hiM && s.hiM.indexOf(k) >= 0;
+      A.mk("rect", { x: MX(k) - 16, y: BASE - h, width: 32, height: Math.max(h, 1.5), rx: 3, fill: on ? "var(--accent)" : "var(--line)" }, root);
+      A.mk("text", { "class": "glabel", x: MX(k), y: BASE - h - 6, "text-anchor": "middle" }, root, k === 5 ? "0（结束）" : fmt(VV[k]));
+    }
+    A.mk("path", { "class": "axis", d: "M" + (TX - 30) + " " + BASE + " H" + (MX(5) + 30) }, root);
+    if (s.bars) A.mk("text", { "class": "sub", x: TX - 40, y: BASE - 60, "text-anchor": "end" }, root, "价值模型");
+    if (s.bars) A.mk("text", { "class": "sub", x: TX - 40, y: BASE - 44, "text-anchor": "end" }, root, "在这个时刻");
+    if (s.bars) A.mk("text", { "class": "sub", x: TX - 40, y: BASE - 28, "text-anchor": "end" }, root, "的预计");
+    if (s.step2) {   // 一步的变化：从时刻 k 到时刻 k+1
+      var k0 = s.step2, x1 = MX(k0 - 1), x2 = MX(k0);
+      A.arrow(root, "M" + (x1 + 20) + " " + (BASE - 104) + " H" + (x2 - 22), "warm");
+      A.label(root, (x1 + x2) / 2, BASE - 110, "δ = " + fmt(D.delta[k0 - 1], 3), "warm", "middle");
+    }
+  }
+
+  function draw(A, root, s) {
+    timeline(A, root, s);
+    var y = 236;
+    s.rows.forEach(function (k) {
+      var r = ROWS[k], vals = r[1];
+      if (s.partial && s.partial[k]) vals = partial(vals, s.partial[k]);
+      var o = { dig: r[2], id: "c_" + k };
+      if (s.hot === k) { if (s.hiCols) o.hiCols = s.hiCols; else o.hi = true; }
+      numRow(A, root, TX, y, CW, r[0], vals, o);
+      y += RH;
+    });
+  }
+
+  var STEPS = [
+    { rows: ["r"], hot: "r",
+      say: "上一页给 5 个 token 各算出一个奖励 r：前 4 个只有很小的 KL 惩罚，最后一个是 " + fmt(D.r[4], 3) + "。这个回答答对了，可是 5 个 token 里，每个 token 对答对出了多少力？优势要回答的就是这个问题：给每个 token 一个数，正数表示写这个 token 让结果变好，负数表示变差。下面先试最简单的算法，看它缺什么，再一步步改进。",
+      code: "rewards = [" + D.r.map(function (v) { return fmt(v, 3); }).join(", ") + "]" },
+    { rows: ["r", "G"], hot: "G",
+      say: "第一种算法：每个 token 记“从它开始往后拿到的奖励总和”。第 1 个 token 往后是全部 5 个奖励相加：" + D.r.map(function (v) { return fmt(v, 3); }).join(" + ") + " = " + fmt(D.G[0], 3) + "。问题是这一行 5 个数都差不多是 0.98：它只说明这个回答拿了高分，没说明拿高分是不是意外。如果策略模型本来就几乎总能答对这道题，拿到 0.98 很正常，不该再往上推。",
+      code: "# 往后奖励总和：从这个 token 到最后一个 token 的奖励相加" },
+    { rows: ["r", "G", "V"], hot: "V", bars: true,
+      say: "所以需要一个“本来预计能拿多少”。价值模型就做这件事：在每个时刻，它读题目和已经写出的 token，预计从这里往后一共还能拿到多少奖励。开始写之前，它只看到题目，预计 " + fmt(D.V[0]) + "；写完第 1 个 token，预计变成 " + fmt(D.V[1]) + "；写完第 4 个 token，预计 " + fmt(D.V[4]) + "；写完第 5 个 token，回答结束，以后不会再有奖励，记 0。每个 token 的价值 V，就是写这个 token 之前那个时刻的预计。",
+      code: "values = value_model(query_response)   # 第 t 个 token 的 V：写第 t 个 token 之前的预计" },
+    { rows: ["r", "G", "V", "GV"], hot: "GV", bars: true,
+      say: "第二种算法：往后奖励总和 − V，也就是“实际拿到的”减“写之前预计的”。第 1 个 token 是 " + fmt(D.G[0], 3) + " − " + fmt(D.V[0]) + " = " + fmt(D.GV[0], 3) + "。这样有了比较。但还有一个问题：往后奖励总和把后面所有 token 的结果都算进来，第 1 个 token 也分到了第 5 个 token 写对的功劳。回答一长，后面 token 的好坏会让前面 token 的这个数忽大忽小。",
+      code: "# 往后奖励总和 − V" },
+    { rows: ["r", "G", "V", "GV", "d"], hot: "d", partial: { d: [0] }, hiCols: [0], bars: true, hiM: [0, 1], hiT: [0], step2: 1,
+      say: "第三种算法只看写这一个 token 带来的变化。写第 1 个 token 之前，价值模型预计 " + fmt(D.V[0]) + "；写完以后，这一步拿到奖励 " + fmt(D.r[0], 3) + "，价值模型重新预计 " + fmt(D.V[1]) + "。写完之后（拿到的 + 新的预计）减写之前的预计：" + fmt(D.r[0], 3) + " + " + fmt(D.V[1]) + " − " + fmt(D.V[0]) + " = " + fmt(D.delta[0], 3) + "。这个数叫 TD 误差 δ。",
+      code: "delta = rewards[t] + gamma * values[t + 1] - values[t]   # gamma = 1.0" },
+    { rows: ["r", "G", "V", "GV", "d"], hot: "d", hiCols: [4], bars: true, hiM: [4, 5], hiT: [4], step2: 5,
+      say: "5 个 token 都这样算。最后一个 token：写之前预计 " + fmt(D.V[4]) + "；写完以后，这一步拿到奖励 " + fmt(D.r[4], 3) + "（判分 1 就在这里），回答结束，新的预计是 0。δ = " + fmt(D.r[4], 3) + " + 0 − " + fmt(D.V[4]) + " = " + fmt(D.delta[4], 3) + "。δ 只看一步，不受后面 token 的影响；代价是它完全相信价值模型的预计，价值模型预计得不准，δ 就不准。",
+      code: "delta = [" + D.delta.map(function (v) { return fmt(v, 3); }).join(", ") + "]" },
+    { rows: ["r", "G", "V", "GV", "d", "A"], hot: "A", partial: { A: [3, 4] }, hiCols: [3], bars: true,
+      say: "PPO 用的优势 A 把这两种算法折中：A = 这个 token 的 δ + 0.95 × 下一个 token 的 δ + 0.95² × 再下一个的 δ + ……，离得越远，乘的 0.95 越多，算得越少。第 4 个 token“*”后面只有 1 个 token：A = " + fmt(D.delta[3], 3) + " + 0.95 × " + fmt(D.delta[4], 3) + " = " + fmt(D.A[3], 3) + "。第 5 个 token 后面没有 token，A 就是它自己的 δ：" + fmt(D.A[4], 3) + "。",
+      code: "# A_t = δ_t + 0.95·δ_(t+1) + 0.95²·δ_(t+2) + …   0.95 是 lam" },
+    { rows: ["r", "G", "V", "GV", "d", "A"], hot: "A", hiCols: [0], bars: true,
+      say: "第 1 个 token：A = " + fmt(D.delta[0], 3) + " + 0.95 × " + fmt(D.delta[1], 3) + " + 0.95² × " + fmt(D.delta[2], 3) + " + 0.95³ × " + fmt(D.delta[3], 3) + " + 0.95⁴ × " + fmt(D.delta[4], 3) + " = " + fmt(D.A[0], 3) + "。对照三行：如果把 0.95 换成 0，A 就是 δ 这一行；换成 1，中间的 V 全部抵消，A 就是“往后奖励总和 − V”这一行（例如 5 个 δ 加起来正好是 " + fmt(D.GV[0], 3) + "）。0.95 让 A 落在两行之间。5 个 A 都是正数，所以下一页会把这 5 个 token 都推高。",
+      code: "lastgaelam = 0\nfor t in reversed(range(5)):   # 从最后一个 token 往前算，和上面的展开式结果相同\n    lastgaelam = delta[t] + gamma * lam * lastgaelam\n    advantages[t] = lastgaelam" },
+    { rows: ["r", "G", "V", "GV", "d", "A", "R"], hot: "R", bars: true,
+      say: "最后算回报 = A + V，表示用这次的结果修正过的“从这个 token 往后能拿到多少”。价值模型更新时，把自己的 V 往回报拉近：第 1 个 token 的 V 是 " + fmt(D.V[0]) + "，回报是 " + fmt(D.R[0], 3) + "，价值模型下次在这个时刻会预计得高一些。",
+      code: "returns = advantages + values" }
+  ];
+
+  function n(title, rows) { return { title: title, rows: rows }; }
+  var NOTES = {
+    c_r: n("奖励 r", [["是什么", "上一页算出的每个 token 的奖励：KL 惩罚 +（最后一个 token）判分。"]]),
+    c_G: n("往后奖励总和", [["是什么", "从这个 token 到最后一个 token 的奖励 r 相加。"], ["缺点", "只说明拿了多少，没说明比预计好还是差。"]]),
+    c_V: n("价值 V", [
+      ["是什么", "价值模型在写这个 token 之前那个时刻的预计：从这里往后一共还能拿到多少奖励。"],
+      ["谁写", "价值模型。它读题目和已经写出的 token，每个时刻输出一个数。"],
+      ["最后", "写完最后一个 token 以后，回答结束，预计记 0。"] ]),
+    c_GV: n("往后奖励总和 − V", [["是什么", "实际拿到的减写之前预计的。"], ["缺点", "把后面所有 token 的结果都算进来，回答越长，这个数越不稳。"]]),
+    c_d: n("TD 误差 δ", [["是什么", "r + γ × 下一个时刻的预计 − 这个时刻的预计。只看写这一个 token 带来的变化。"], ["γ", "gamma，TRL 默认 1.0，后面的奖励不打折。"], ["缺点", "完全依赖价值模型的预计。"]]),
+    c_A: n("优势 A", [
+      ["是什么", "δ + 0.95 × 下一个 δ + 0.95² × 再下一个 δ + ……。这种算法叫 GAE（广义优势估计）。"],
+      ["0.95", "lam，TRL 默认 0.95。换成 0 时 A = δ；换成 1 时 A = 往后奖励总和 − V。"],
+      ["例子省掉的一步", "TRL 算完以后还会把一整批回答的优势标准化（减平均数、除以标准差）。例子只有一个回答，省掉这一步。"] ]),
+    c_R: n("回报", [["是什么", "A + V。价值模型把 V 往这个数拉近。"]])
+  };
+
+  makeView({ P: "c-", key: "advantage", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hi", "这一步算出或用到的数"], ["new", "这一步看的 token"], ["info", "点行看说明"]] });
+})();
+
+/* ===== 第 4 页：策略怎么更新（比率和截断），价值模型怎么更新 ===== */
+(function () {
+  var TX = 250, CW = 116, FX = 845;
+  var Y = [70, 116, 162, 208, 254, 300, 346];
+  var ONES = [1, 1, 1, 1, 1];
+
+  function plot(A, root, x, y, w, h, pos, s) {
+    var x0 = x + 30, x1 = x + w, ylo = pos ? 0 : -2, yhi = pos ? 1.6 : 0;
+    function X(r) { return x0 + (r / 2) * (x1 - x0); }
+    function Yv(v) { return y + h - (v - ylo) / (yhi - ylo) * h; }
+    A.mk("text", { "class": "gtitle", x: x, y: y - 14 }, root, pos ? "优势为正时（例子里 5 个 token 都是这种）" : "优势为负时（回答答错时）");
+    A.mk("path", { "class": "axis", d: "M" + x0 + " " + y + " V" + (y + h) + " H" + x1 }, root);
+    [0.8, 1.0, 1.2].forEach(function (r) {
+      A.mk("path", { "class": "guide", d: "M" + X(r) + " " + y + " V" + (y + h) }, root);
+      A.mk("text", { "class": "glabel", x: X(r), y: y + h + 16, "text-anchor": "middle" }, root, r.toFixed(1));
+    });
+    A.mk("text", { "class": "glabel", x: x1, y: y + h + 16, "text-anchor": "end" }, root, "比率");
+    if (pos) {
+      A.mk("path", { "class": "curve", d: "M" + X(0) + " " + Yv(0) + " L" + X(1.2) + " " + Yv(1.2) }, root);
+      A.mk("path", { "class": "curve flat", d: "M" + X(1.2) + " " + Yv(1.2) + " L" + X(2) + " " + Yv(1.2) }, root);
+      A.mk("text", { "class": "sub", x: X(1.25), y: Yv(1.2) - 10 }, root, "比率 > 1.2：平的，不再往上推");
+      if (s.dot) {
+        A.mk("circle", { "class": "dot", cx: X(D.ratio[0]), cy: Yv(1.2), r: 6 }, root);
+        A.mk("text", { "class": "sub", x: X(D.ratio[0]) + 10, y: Yv(1.2) + 20 }, root, "第 1 个 token：比率 " + D.ratio[0].toFixed(3));
+      }
+    } else {
+      A.mk("path", { "class": "curve flat", d: "M" + X(0) + " " + Yv(-0.8) + " L" + X(0.8) + " " + Yv(-0.8) }, root);
+      A.mk("path", { "class": "curve", d: "M" + X(0.8) + " " + Yv(-0.8) + " L" + X(2) + " " + Yv(-2) }, root);
+      A.mk("text", { "class": "sub", x: X(0.02), y: Yv(-0.8) - 10 }, root, "比率 < 0.8：平的，不再往下压");
+    }
+  }
+
+  function draw(A, root, s) {
+    tokRow(A, root, TX, 24, CW, true);
+    var rows;
+    if (s.mode === "vf") {
+      rows = [
+        ["旧 V", D.V, 2, "", "写完回答时价值模型的输出"],
+        ["新 V", D.Vnew, 2, "", "更新过程中重新算"],
+        ["截断后的新 V", D.Vc, 2, "", "限制在旧 V ± 0.2 之内"],
+        ["回报", D.R, 3, "", "= A + 旧 V（上一页）"],
+        ["(新 V − 回报)²", D.l1, 4, "", ""],
+        ["(截断后 − 回报)²", D.l2, 4, "", ""],
+        ["取较大", D.l2.map(function (v, j) { return Math.max(v, D.l1[j]); }), 4, "", "价值损失 = 0.5 × 平均"]
+      ];
+    } else {
+      var newL = s.step === 1 ? D.old : D.new, rat = s.step === 1 ? ONES : D.ratio;
+      rows = [
+        ["旧 logp", D.old, 2, "", "写回答时记下，不变"],
+        ["新 logp", newL, 2, "", s.step === 1 ? "还没更新：等于旧 logp" : "更新几次以后重新算"],
+        ["比率", rat, 3, "", "= e^(新 logp − 旧 logp)"],
+        ["优势 A", D.A, 3, "", "上一页算出"],
+        ["比率 × A", D.s1, 3, "", ""],
+        ["截断后的比率 × A", D.s2, 3, "", "比率限制在 0.8 到 1.2"],
+        ["取较小", D.mn, 3, "", "策略损失 = −平均"]
+      ];
+    }
+    rows.forEach(function (r, i) {
+      if (i >= s.rows) return;
+      var o = { dig: r[2], id: "u_" + (s.mode || "pg") + i };
+      if (i === s.rows - 1 && !s.cut) o.hi = true;
+      if (s.cut && (i === s.cutRow)) o.cut = s.cut;
+      if (s.hiCols && i === s.rows - 1) { o.hi = false; o.hiCols = s.hiCols; }
+      numRow(A, root, TX, Y[i], CW, r[0], r[1], o);
+      if (r[4]) A.mk("text", { "class": "formula", x: FX, y: Y[i] + 19 }, root, r[4]);
+    });
+    if (s.plot) {
+      plot(A, root, 70, 430, 380, 170, true, s);
+      plot(A, root, 560, 430, 380, 170, false, s);
+    }
+  }
+
+  var STEPS = [
+    { step: 1, rows: 3,
+      say: "这一页逐步算策略模型和价值模型怎么更新。更新开始时，策略模型还没变，它给同一个回答重新算出的新 logp 等于旧 logp，所以比率 = e^(新 logp − 旧 logp) = 1。比率表示：现在的策略模型写这个 token 的概率，是写回答时的多少倍。",
+      code: "new_logprobs = selective_log_softmax(policy(query_response).logits, response)\nratio = torch.exp(new_logprobs - logprobs)   # 第一个小批次：全是 1" },
+    { step: 2, rows: 3,
+      say: "同一批回答要用 4 遍，每一遍分几个小批次，每个小批次都更新一次策略模型。更新了几次以后，策略模型再给这个回答算 logp，新 logp 变了。第 1 个 token 的新 logp 是 " + fmt(D.new[0]) + "，比率 = e^(" + fmt(D.new[0]) + " − (" + fmt(D.old[0]) + ")) = " + D.ratio[0].toFixed(3) + "：现在写它的概率是写回答时的 " + D.ratio[0].toFixed(3) + " 倍。",
+      code: "ratio = torch.exp(new_logprobs - logprobs)   # [" + D.ratio.map(function (v) { return v.toFixed(3); }).join(", ") + "]" },
+    { step: 3, rows: 5,
+      say: "比率 × 优势是策略模型要往大推的量。优势为正时，把这个乘积推大就是把比率推大，也就是把新 logp 推高；优势为负时正好反过来。不加限制的话，策略模型会在同一批回答上一直推，概率可以变到写回答时的好几倍，而这批回答是旧的策略模型写的，推得太远就不可靠了。",
+      code: "pg_losses = -advantages * ratio   # 损失取负号：损失越小，比率 × 优势越大" },
+    { step: 4, rows: 6, cut: [0], cutRow: 5,
+      say: "PPO 先把比率限制在 0.8 到 1.2 之间（cliprange = 0.2），再乘以优势。第 1 个 token 的比率 " + D.ratio[0].toFixed(3) + " 超过 1.2，被截成 1.2，截断后的比率 × 优势 = 1.2 × " + fmt(D.A[0], 3) + " = " + fmt(D.s2[0], 3) + "。其余 4 个 token 的比率都在范围内，两行数一样。",
+      code: "pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - 0.2, 1.0 + 0.2)" },
+    { step: 5, rows: 7, cut: [0], cutRow: 6,
+      say: "每个 token 在两行里取较小的那个。第 1 个 token 取到的是截断后的 " + fmt(D.mn[0], 3) + "：这个数里的 1.2 是常数，不随策略模型变化，所以第 1 个 token 这一次不产生梯度，策略模型不再推高它。其余 4 个 token 取到的就是比率 × 优势，继续被推高。",
+      code: "pg_loss_max = torch.max(pg_losses, pg_losses2)   # 带负号以后取较大 = 不带负号时取较小" },
+    { step: 6, rows: 7, cut: [0], cutRow: 6, plot: true, dot: true,
+      say: "下面两张图画出“取较小”随比率怎么变。优势为正时，比率超过 1.2 以后线是平的：再推高也拿不到更多，所以不再推高，第 1 个 token 就停在这里。优势为负时，比率低于 0.8 以后线是平的：已经压得够低，不再往下压。两种情况下，比率往“变差”的方向走时线都不平，所以策略模型还会被拉回来。",
+      code: "# 优势 > 0：比率 > 1.2 时梯度为 0\n# 优势 < 0：比率 < 0.8 时梯度为 0" },
+    { step: 7, rows: 7, cut: [0], cutRow: 6, plot: true, dot: true,
+      say: "策略损失 = −（取较小这一行的平均）= −(" + D.mn.map(function (v) { return fmt(v, 3); }).join(" + ") + ") ÷ 5 = " + fmt(D.pg, 3) + "。优化器把这个损失往小推，也就是把取较小这一行往大推。",
+      code: "pg_loss = masked_mean(pg_loss_max, ~padding_mask)   # " + fmt(D.pg, 3) },
+    { step: 8, mode: "vf", rows: 7, cut: [4], cutRow: 2,
+      say: "价值模型的更新也有类似的限制。价值模型给每个 token 算出新 V，新 V 先被限制在旧 V ± 0.2 之内：最后一个 token 的新 V 是 " + fmt(D.Vnew[4]) + "，旧 V 是 " + fmt(D.V[4]) + "，截断成 " + fmt(D.Vc[4]) + "。新 V 和截断后的新 V 各自与回报算平方差，每个 token 取较大的那个；最后一个 token 取到截断后的平方差，这一次不再推它的 V。价值损失 = 0.5 × 平均 = " + D.vf.toFixed(4) + "。",
+      code: "vpredclipped = torch.clamp(vpred, values - 0.2, values + 0.2)\nvf_loss = 0.5 * masked_mean(torch.max((vpred - returns) ** 2, (vpredclipped - returns) ** 2))" },
+    { step: 9, mode: "vf", rows: 7,
+      say: "总损失 = 策略损失 + 0.1 × 价值损失 = " + fmt(D.pg, 4) + " + 0.1 × " + D.vf.toFixed(4) + " = " + fmt(D.loss, 4) + "，优化器用它更新一次策略模型和价值模型。这样的更新在一批回答上做 4 遍、每遍几个小批次；做完以后，策略模型重新写回答，开始下一步训练。",
+      code: "loss = pg_loss + vf_coef * vf_loss   # vf_coef = 0.1\naccelerator.backward(loss); optimizer.step(); optimizer.zero_grad()" }
+  ];
+
+  function n(title, rows) { return { title: title, rows: rows }; }
+  var NOTES = {
+    u_pg0: n("旧 logp", [["是什么", "写回答时策略模型给每个 token 的 logp。这一批回答用完 4 遍之前不变，比率都拿它当分母。"]]),
+    u_pg1: n("新 logp", [["是什么", "更新过程中，当前的策略模型给同一个回答重新算的 logp。每个小批次都重新算。"]]),
+    u_pg2: n("比率", [["是什么", "e^(新 logp − 旧 logp) = 新概率 ÷ 旧概率。"], ["为什么要它", "回答是旧的策略模型写的。比率把“旧的策略模型写出的回答”换算成“现在的策略模型会多常写它”，也用来判断策略模型已经改了多远。"]]),
+    u_pg3: n("优势 A", [["是什么", "“优势怎么算”那一页算出的每个 token 的优势。"]]),
+    u_pg4: n("比率 × A", [["是什么", "不加限制时要往大推的量。"]]),
+    u_pg5: n("截断后的比率 × A", [["是什么", "比率先限制在 [1 − ε, 1 + ε]，再乘以优势。ε 是 cliprange，TRL 默认 0.2。"]]),
+    u_pg6: n("取较小", [["是什么", "每个 token 在“比率 × A”和“截断后的比率 × A”里取较小的。"], ["结果", "比率已经往有利方向走出范围时，取到的是常数，梯度为 0；其余情况照常推。"], ["策略损失", "−（这一行的平均）。"]]),
+    u_vf0: n("旧 V", [["是什么", "写完回答时价值模型给每个 token 的价值。"]]),
+    u_vf1: n("新 V", [["是什么", "更新过程中价值模型重新算的价值（代码里叫 vpred）。"]]),
+    u_vf2: n("截断后的新 V", [["是什么", "新 V 限制在旧 V ± 0.2 之内。0.2 是 cliprange_value。"]]),
+    u_vf3: n("回报", [["是什么", "优势 A + 旧 V，价值模型的训练目标。"]]),
+    u_vf4: n("(新 V − 回报)²", [["是什么", "不加限制时的平方差。"]]),
+    u_vf5: n("(截断后的新 V − 回报)²", [["是什么", "加了限制以后的平方差。"]]),
+    u_vf6: n("取较大", [["是什么", "两种平方差取较大的。价值损失 = 0.5 × 这一行的平均。"]])
+  };
+
+  makeView({ P: "u-", key: "update", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hi", "这一步算出的数"], ["cut", "被截断的数"], ["info", "点行看说明"]] });
+})();
+
+</script>
+<script>
+(function () {
+  var TABS = [{"key": "overview", "p": "o", "title": "PPO 整体：PPO 一步训练"}, {"key": "reward", "p": "b", "title": "PPO 奖励怎么落到每个 token 上"}, {"key": "advantage", "p": "c", "title": "PPO 优势怎么算"}, {"key": "update", "p": "u", "title": "PPO 策略怎么更新"}], active = TABS[0].key;
+  window.__setHash = function (key, n) {
+    if (key !== active) return;
+    try { history.replaceState(null, "", "#" + key + "-" + n); } catch (e) {}
+  };
+  function activate(key, step) {
+    active = key;
+    TABS.forEach(function (t) {
+      document.getElementById(t.p + "-view").hidden = (t.key !== key);
+      document.getElementById("tab-" + t.key).setAttribute("aria-selected", t.key === key ? "true" : "false");
+      if (t.key === key) document.title = t.title;
+    });
+    var v = window.__v[key];
+    v.show(step === undefined ? v.cur() : step - 1);
+  }
+  TABS.forEach(function (t) {
+    document.getElementById("tab-" + t.key).addEventListener("click", function () { activate(t.key); window.scrollTo(0, 0); });
+  });
+  function fromHash() {
+    var m = /^#([a-z]+)(?:-(\d+))?$/.exec(location.hash);
+    if (m && window.__v[m[1]]) activate(m[1], m[2] ? parseInt(m[2], 10) : undefined);
+    else activate(active);
+  }
+  window.addEventListener("hashchange", fromHash);
+  fromHash();
+})();
+</script>
+</body>
+</html>

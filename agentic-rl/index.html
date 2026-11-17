@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentic RL 逐步讲解 (Copy)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #16202b; --muted: #5d6b7a; --line: #c9d1da;
+    --accent: #0b6e8a; --warm: #a8650c; --proc: #e3f1f5; --good: #2f8a4f; --bad: #b42318; --purple: #7b4fb3;
+    --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f151b; --panel: #161e26; --ink: #e6edf3; --muted: #93a1b0; --line: #2c3844;
+      --accent: #4cc0df; --warm: #f0b44c; --proc: #16303a; --good: #62d48a; --bad: #ff7b72; --purple: #b99bf0; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+  .wrap { padding: 24px 16px 40px; }
+  .view { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .view[hidden] { display: none; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0; text-wrap: balance; }
+  .gist { margin: -6px 0 0; font-size: 16px; line-height: 1.7; max-width: 48em; }
+
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  svg.diagram { display: block; width: 100%; height: auto; font-family: var(--font-body); }
+  .colhead { fill: var(--muted); font-size: 13px; font-weight: 500; }
+
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  .title { fill: var(--ink); font-family: var(--font-code); font-size: 13.5px; font-weight: 600; }
+  .titlecn { fill: var(--ink); font-size: 14px; font-weight: 700; }
+  .sub { fill: var(--muted); font-size: 12.5px; }
+  .node { opacity: 0.25; transition: opacity .45s; }
+  .node.on, .node.sel { opacity: 1; }
+  .node.hot .box { stroke: var(--accent); stroke-width: 3; }
+  .node.sel .box { stroke: var(--ink); stroke-width: 3; stroke-dasharray: 7 4; }
+  .node.proc .box { fill: var(--proc); }
+  .clickable { cursor: pointer; outline: none; }
+  .clickable:hover .box { stroke: var(--ink); }
+  .clickable:focus-visible .box { stroke: var(--ink); stroke-width: 3; }
+  .node.ghost .box { fill: none; stroke-dasharray: 6 4; stroke: var(--muted); }
+  .node.ghost .titlecn { fill: var(--muted); }
+  .node.ghost.hot .box { stroke: var(--accent); stroke-width: 2.5; }
+  .sw.ghost { border: 1.5px dashed var(--muted); background: transparent; }
+  .node.env .box { fill: color-mix(in srgb, var(--warm) 13%, var(--panel)); }
+  .subcode { fill: var(--ink); font-family: var(--font-code); font-size: 12.5px; }
+  .sw.proc { background: var(--proc); }
+  .sw.env { background: color-mix(in srgb, var(--warm) 13%, var(--panel)); }
+  .seg { stroke: var(--line); stroke-width: 1; }
+  .stack { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+
+  .info circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; }
+  .info text { fill: var(--muted); font-family: var(--font-code); font-size: 12px; font-weight: 600; }
+  .clickable:hover .info circle, .sel .info circle { fill: var(--ink); stroke: var(--ink); }
+  .clickable:hover .info text, .sel .info text { fill: var(--panel); }
+
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  .link { fill: none; stroke: var(--accent); stroke-width: 2.2; animation: fadein .45s; }
+  .link.back { stroke: var(--muted); stroke-dasharray: 5 4; }
+  .link.warm { stroke: var(--warm); }
+  .linklabel { fill: var(--accent); font-family: var(--font-code); font-size: 12px; font-weight: 600; animation: fadein .45s; }
+  .linklabel.muted { fill: var(--muted); font-family: var(--font-body); font-weight: 500; }
+  .linklabel.warm { fill: var(--warm); }
+
+  .chip rect { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+  .chip text { fill: var(--muted); font-family: var(--font-code); font-size: 13px; }
+  .chip.found rect { fill: var(--accent); stroke: var(--accent); }
+  .chip.found text { fill: #fff; font-weight: 600; }
+  .chip.new rect { fill: var(--warm); stroke: var(--warm); animation: fadein .45s; }
+  .chip.new text { fill: #fff; font-weight: 600; }
+  .chip.empty rect { fill: var(--panel); stroke-dasharray: 4 3; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.found text, :root:not([data-theme="light"]) .chip.new text { fill: #0f151b; } }
+
+  .gtitle { fill: var(--ink); font-size: 13px; font-weight: 700; }
+  .gtitle .code { font-family: var(--font-code); }
+  .glabel { fill: var(--muted); font-size: 12.5px; font-family: var(--font-code); }
+  .cell rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+  .cell .heat { stroke: none; fill: var(--accent); }
+  .cell text { font-family: var(--font-code); font-size: 12px; fill: var(--ink); }
+  .cell.hi rect.bg { fill: color-mix(in srgb, var(--warm) 22%, var(--panel)); stroke: var(--warm); }
+  .cell.dark text { fill: #fff; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cell.dark text { fill: #0f151b; } }
+  .cell.masked rect.bg { fill: var(--line); stroke: var(--line); }
+  .cell.masked text { fill: var(--muted); }
+  .cell.ok rect.bg { fill: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+  .cell.ok text { fill: var(--accent); font-weight: 600; }
+  .sw.ok { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+  .cell.blank rect.bg { fill: var(--panel); stroke-dasharray: 3 3; }
+  .cell.cut rect.bg { fill: color-mix(in srgb, var(--bad) 14%, var(--panel)); stroke: var(--bad); stroke-width: 2; }
+  .cell.cut text { fill: var(--bad); font-weight: 600; }
+  .sw.cut { background: color-mix(in srgb, var(--bad) 14%, var(--panel)); border: 2px solid var(--bad); }
+  .formula { fill: var(--muted); font-size: 12.5px; }
+  .axis { stroke: var(--muted); stroke-width: 1.2; fill: none; }
+  .guide { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 4 4; }
+  .curve { fill: none; stroke: var(--accent); stroke-width: 3; }
+  .curve.flat { stroke: var(--bad); }
+  .dot { fill: var(--warm); }
+  .cell.zero text { fill: var(--muted); opacity: .55; }
+  .gridg { animation: fadein .45s; }
+  .gridg.clickable:hover .gframe { stroke: var(--ink); }
+  .gframe { fill: none; stroke: transparent; stroke-width: 2; }
+  .gridg.hot .gframe { stroke: var(--accent); stroke-width: 2.5; }
+  .region { fill: none; stroke-width: 3; }
+  .region.src { stroke: var(--good); }
+  .region.cross { stroke: var(--warm); }
+  .region.tgt { stroke: var(--purple); }
+  .sw.src { border: 2.5px solid var(--good); background: transparent; }
+  .sw.cross { border: 2.5px solid var(--warm); background: transparent; }
+  .sw.tgt { border: 2.5px solid var(--purple); background: transparent; }
+  .frame { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 2 3; }
+  .divider { stroke: var(--line); stroke-width: 1.5; }
+  .gridg.sel .gframe { stroke: var(--ink); stroke-dasharray: 7 4; }
+  .op { fill: var(--muted); font-family: var(--font-code); font-size: 18px; font-weight: 600; }
+  .bar { fill: var(--line); }
+  .bar.win { fill: var(--accent); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; color: var(--muted); font-size: 13.5px; margin-top: -6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .sw.hot { border: 3px solid var(--accent); background: var(--panel); }
+  .sw.hi { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); border-color: var(--warm); }
+  .sw.heat { background: linear-gradient(90deg, var(--panel), var(--accent)); }
+  .sw.masked { background: var(--line); }
+  .sw.new { background: var(--warm); border-color: var(--warm); }
+  .legend .icon { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--muted); display: inline-grid; place-items: center; font-family: var(--font-code); font-size: 11px; font-weight: 600; }
+
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--ink); border-radius: 14px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .note[hidden] { display: none; }
+  .note-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .note-title { margin: 0; font-family: var(--font-code); font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+  .note-close { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .note-close:hover { border-color: var(--ink); }
+  .note dl { margin: 0; display: grid; grid-template-columns: 8.5em 1fr; gap: 10px 16px; }
+  .note dt { color: var(--muted); font-size: 14px; padding-top: 1px; }
+  .note dd { margin: 0; font-size: 15px; line-height: 1.7; min-width: 0; }
+  .note dd p { margin: 0; }
+  .sample { margin: 0; font-family: var(--font-code); font-size: 12.5px; line-height: 1.55; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow: auto; }
+  .sample-cap { color: var(--muted); font-size: 13.5px; margin-bottom: 4px !important; }
+
+  .caption { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-height: 140px; display: flex; flex-direction: column; gap: 12px; }
+  .caption .say { margin: 0; font-size: 19px; line-height: 1.65; font-weight: 500; max-width: 42em; text-wrap: pretty; }
+  .caption .code { margin: 0; font-family: var(--font-code); font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+  .nav { display: flex; align-items: center; gap: 14px; }
+  .nav button.arrow-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .nav button.arrow-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .nav button.arrow-btn:disabled { opacity: .35; cursor: default; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .dots { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; justify-content: center; }
+  .dots button { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); background: var(--panel); cursor: pointer; }
+  .dots button.done { background: var(--line); }
+  .dots button.now { background: var(--accent); border-color: var(--accent); transform: scale(1.25); }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; min-width: 3.5em; text-align: right; flex: none; }
+
+  @media (min-width: 700px) {
+    .nav button.arrow-btn { position: fixed; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+    .nav .prev { left: 8px; }
+    .nav .next { right: 8px; }
+    .view { padding-inline: 64px; }
+  }
+  @media (min-width: 1200px) {
+    .view { padding-inline: 0; }
+    .nav .prev { left: calc(50% - 592px); }
+    .nav .next { right: calc(50% - 592px); }
+  }
+  @media (max-width: 640px) { .note dl { grid-template-columns: 1fr; gap: 2px 0; } .note dd { margin-bottom: 8px; } }
+  @media (prefers-reduced-motion: reduce) { .node, .link, .linklabel, .gridg, .chip.new rect { transition: none; animation: none; } }
+
+  .tabs { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 14px 16px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .tab { font-family: var(--font-body); font-size: 14px; padding: 7px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .tab:hover { border-color: var(--accent); }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0f151b; } }
+</style>
+</head>
+<body>
+<nav class="tabs" role="tablist" aria-label="切换页面">
+  <button class="tab" role="tab" id="tab-overview" aria-selected="true">整体：一条轨迹怎么来</button>
+  <button class="tab" role="tab" id="tab-mask" aria-selected="false">哪些 token 参与训练</button>
+  <button class="tab" role="tab" id="tab-advantage" aria-selected="false">判分和优势</button>
+  <button class="tab" role="tab" id="tab-update" aria-selected="false">策略模型怎么更新</button>
+</nav>
+<div class="wrap">
+<div class="view" id="o-view">
+  <h1>一条轨迹怎么来：修代码任务</h1>
+  <p class="gist">本质上是，策略模型每次只写一个工具调用，环境执行后把结果接到后面，策略模型接着写，直到写出 finish；轨迹写完后，环境重新跑测试，给整条轨迹一个判分。</p>
+  <div class="legend" id="o-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="o-diagram" viewBox="0 0 1000 550" role="group" aria-label="一条轨迹怎么来：修代码任务">
+      <defs><marker id="o-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="o-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="o-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="o-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="o-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="o-noteTitle"></h2>
+      <button class="note-close" id="o-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="o-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="o-say"></p>
+    <p class="code" id="o-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="o-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="o-dots"></div>
+    <span class="count" id="o-count"></span>
+    <button class="arrow-btn next" id="o-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="m-view" hidden>
+  <h1>哪些 token 参与训练：loss mask</h1>
+  <p class="gist">本质上是，一条轨迹里只有策略模型自己写的 token 算损失，题目和环境返回的工具输出只给策略模型读，不算损失。</p>
+  <div class="legend" id="m-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="m-diagram" viewBox="0 0 1000 440" role="group" aria-label="哪些 token 参与训练：loss mask">
+      <defs><marker id="m-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="m-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="m-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="m-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="m-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="m-noteTitle"></h2>
+      <button class="note-close" id="m-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="m-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="m-say"></p>
+    <p class="code" id="m-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="m-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="m-dots"></div>
+    <span class="count" id="m-count"></span>
+    <button class="arrow-btn next" id="m-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="a-view" hidden>
+  <h1>判分和优势：同一个任务写一组轨迹</h1>
+  <p class="gist">本质上是，同一个任务写 4 条轨迹，每条的判分减去 4 条的平均判分、再除以标准差，就是这条轨迹的优势；这条轨迹里策略模型写的每个 token 都用这一个数。</p>
+  <div class="legend" id="a-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="a-diagram" viewBox="0 0 1000 400" role="group" aria-label="判分和优势：同一个任务写一组轨迹">
+      <defs><marker id="a-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="a-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="a-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="a-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="a-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="a-noteTitle"></h2>
+      <button class="note-close" id="a-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="a-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="a-say"></p>
+    <p class="code" id="a-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="a-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="a-dots"></div>
+    <span class="count" id="a-count"></span>
+    <button class="arrow-btn next" id="a-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="u-view" hidden>
+  <h1>策略模型怎么更新：损失怎么合成一个数</h1>
+  <p class="gist">本质上是，策略模型写的每个 token 按优势被推高或压低，再把所有这些 token 的损失合成一个数；按 token 平均还是按轨迹平均，决定了长轨迹占多大分量。</p>
+  <div class="legend" id="u-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="u-diagram" viewBox="0 0 1000 280" role="group" aria-label="策略模型怎么更新：损失怎么合成一个数">
+      <defs><marker id="u-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="u-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="u-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="u-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="u-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="u-noteTitle"></h2>
+      <button class="note-close" id="u-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="u-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="u-say"></p>
+    <p class="code" id="u-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="u-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="u-dots"></div>
+    <span class="count" id="u-count"></span>
+    <button class="arrow-btn next" id="u-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</div>
+<script>
+var D = {"segs": [["题目", "prompt", 60], ["第 1 轮：策略模型写", "model", 15], ["第 1 轮：工具输出", "env", 45], ["第 2 轮：策略模型写", "model", 40], ["第 2 轮：工具输出", "env", 8], ["第 3 轮：策略模型写", "model", 10], ["第 3 轮：工具输出", "env", 12], ["第 4 轮：策略模型写", "model", 6]], "tot": 196, "model": 71, "env": 65, "R": [1.0, 0.0, 1.0, 0.0], "n": [71, 50, 120, 140], "mean": 0.5, "std": 0.577, "A": [0.866, -0.866, 0.866, -0.866], "per": [-0.866, 0.866, -0.866, 0.866], "total": [-61.48, 43.29, -103.91, 121.22], "sumTotal": -0.866, "sumN": 381, "tok": -0.00227, "traj": 0.0, "wTok": [0.186, 0.131, 0.315, 0.367], "wTraj": [0.25, 0.25, 0.25, 0.25]};
+var SVGNS = "http://www.w3.org/2000/svg";
+function fmt(v, d) {
+  if (typeof v === "string") return v;
+  if (v === null) return "−∞";
+  d = d === undefined ? 2 : d;
+  if (Math.abs(v) < 0.5 * Math.pow(10, -d)) return (0).toFixed(d);
+  return (v < 0 ? "−" : "") + Math.abs(v).toFixed(d);
+}
+function vec(row) { return "(" + row.map(fmt).join(", ") + ")"; }
+function col(M, a, b) { return M.map(function (r) { return r.slice(a, b); }); }
+
+/* 一个页面：顶部 h1 和一句话，中间 SVG，点框看说明，下面是这一步的说明和代码，最下面翻页 */
+function makeView(cfg) {
+  var P = cfg.P;
+  var $ = function (id) { return document.getElementById(P + id); };
+  var selected = null, cur = 0;
+
+  function mk(tag, attrs, parent, text) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+  function clickable(g, id) {
+    g.classList.add("clickable");
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button");
+    g.setAttribute("aria-label", cfg.notes[id].title + "，点击查看说明");
+    g.setAttribute("data-id", id);
+    if (id === selected) g.classList.add("sel");
+    g.addEventListener("click", function () { choose(id); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(id); } });
+  }
+  function info(g, cx, cy) {
+    var ic = mk("g", { "class": "info" }, g);
+    mk("circle", { cx: cx, cy: cy, r: 9 }, ic);
+    mk("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, ic, "i");
+  }
+  /* 框：id、x、y、宽、高、标题、小字；s.on 里有它就亮，s.hot 里有它就描蓝边 */
+  function box(root, s, id, x, y, w, h, title, sub, opt) {
+    opt = opt || {};
+    var g = mk("g", { "class": "node" + (s.on.indexOf(id) >= 0 ? " on" : "") + (s.hot.indexOf(id) >= 0 ? " hot" : "") + (opt.proc ? " proc" : "") + (opt.env ? " env" : "") }, root);
+    if (opt.ghost) g.classList.add("ghost");
+    if (opt.stack) {
+      mk("rect", { "class": "stack", x: x + 10, y: y - 10, width: w, height: h, rx: 10 }, g);
+      mk("rect", { "class": "stack", x: x + 5, y: y - 5, width: w, height: h, rx: 10 }, g);
+    }
+    mk("rect", { "class": "box", x: x, y: y, width: w, height: h, rx: 10 }, g);
+    var oneLine = !sub;
+    mk("text", { "class": opt.cn ? "titlecn" : "title", x: x + 14, y: oneLine ? y + h / 2 + 5 : y + 24 }, g, title);
+    if (sub) mk("text", { "class": opt.subCode ? "subcode" : "sub", x: x + 14, y: y + 44 }, g, sub);
+    info(g, x + w - 18, oneLine ? y + h / 2 : y + 20);
+    clickable(g, id);
+    return g;
+  }
+  function chip(root, x, y, text, kind) {
+    var w = Math.max(34, text.replace(/[^\x00-\xff]/g, "xx").length * 8 + 18);
+    var g = mk("g", { "class": "chip" + (kind ? " " + kind : "") }, root);
+    mk("rect", { x: x, y: y, width: w, height: 26, rx: 6 }, g);
+    mk("text", { x: x + w / 2, y: y + 18, "text-anchor": "middle" }, g, text);
+    return w;
+  }
+  /* 数字网格：o.rows 行名、o.cols 列名、o.hiRow 跟着看的那一行、o.heat 按数值深浅上色（0–1）、o.zero 把 0 变淡 */
+  function grid(root, x, y, M, o) {
+    o = o || {};
+    var cw = o.cw || 52, ch = 28;
+    var g = mk("g", { "class": "gridg" + (o.hot ? " hot" : "") }, root);
+    var top = y;
+    if (o.title) { mk("text", { "class": "gtitle", x: x, y: y + 13 }, g, o.title); top += 22; }
+    if (o.cols) {
+      o.cols.forEach(function (c, j) { mk("text", { "class": "glabel", x: x + j * cw + cw / 2, y: top + 12, "text-anchor": "middle" }, g, c); });
+      top += 18;
+    }
+    M.forEach(function (row, i) {
+      if (o.rows) mk("text", { "class": "glabel", x: x - 8, y: top + i * ch + 19, "text-anchor": "end" }, g, o.rows[i]);
+      row.forEach(function (v, j) {
+        var hiCell = (o.hiCells && o.hiCells.some(function (c) { return c[0] === i && c[1] === j; })) || (o.hiRow === i) || (o.hiRows && o.hiRows.indexOf(i) >= 0) || (o.hiCols && o.hiCols.indexOf(j) >= 0) || (o.hiAll);
+        var cls = "cell" + (hiCell ? " hi" : "") + (v === null ? " masked" : "") + (v === "✓" ? " ok" : "") + (v === "" ? " blank" : "") + (o.cut && o.cut.some(function (c) { return c[0] === i && c[1] === j; }) ? " cut" : "") + (o.zero && v === 0 ? " zero" : "") + (o.heat && v !== null && v > 0.55 ? " dark" : "");
+        var cg = mk("g", { "class": cls }, g);
+        mk("rect", { "class": "bg", x: x + j * cw, y: top + i * ch, width: cw, height: ch }, cg);
+        if (o.heat && v !== null) mk("rect", { "class": "heat", x: x + j * cw + 1, y: top + i * ch + 1, width: cw - 2, height: ch - 2, "fill-opacity": Math.min(1, v * 0.95) }, cg);
+        mk("text", { x: x + j * cw + cw / 2, y: top + i * ch + 18.5, "text-anchor": "middle" }, cg, fmt(v, o.digRows ? o.digRows[i] : o.dig));
+      });
+    });
+    var w = M[0].length * cw, hgt = top - y + M.length * ch;
+    if (o.id) {
+      mk("rect", { "class": "gframe", x: x - (o.rows ? 52 : 6), y: y - 6, width: w + (o.rows ? 58 : 12), height: hgt + 12, rx: 8 }, g);
+      g.insertBefore(g.lastChild, g.firstChild);
+      if (o.title) { var tw = o.title.replace(/[^\x00-\xff]/g, "xx").length * 6.6; info(g, Math.max(x + w - 6, x + tw + 14), y + 9); }
+      clickable(g, o.id);
+    }
+    return { w: w, h: hgt, bottom: y + hgt, right: x + w };
+  }
+  function arrow(root, d, cls) { return mk("path", { "class": "link" + (cls ? " " + cls : ""), d: d, "marker-end": "url(#" + P + (cls === "back" ? "headm" : cls === "warm" ? "headw" : "head") + ")" }, root); }
+  function label(root, x, y, text, cls, anchor) { return mk("text", { "class": "linklabel" + (cls ? " " + cls : ""), x: x, y: y, "text-anchor": anchor || "start" }, root, text); }
+  var api = { mk: mk, box: box, chip: chip, grid: grid, arrow: arrow, label: label };
+
+  function renderNote(id) {
+    var n = cfg.notes[id];
+    $("noteTitle").textContent = n.title;
+    var dl = $("noteRows"); dl.textContent = "";
+    n.rows.forEach(function (row) {
+      var dt = document.createElement("dt"); dt.textContent = row[0];
+      var dd = document.createElement("dd"); var v = row[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else {
+        if (v.cap) { var pc = document.createElement("p"); pc.className = "sample-cap"; pc.textContent = v.cap; dd.appendChild(pc); }
+        var pre = document.createElement("pre"); pre.className = "sample"; pre.textContent = v.pre; dd.appendChild(pre);
+      }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    document.querySelectorAll("#" + P + "diagram [data-id]").forEach(function (g) { g.classList.toggle("sel", g.getAttribute("data-id") === selected); });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+
+  function show(i) {
+    cur = Math.max(0, Math.min(cfg.steps.length - 1, i));
+    var s = cfg.steps[cur];
+    s.on = s.on || []; s.hot = s.hot || [];
+    var root = $("draw"); root.textContent = "";
+    cfg.draw(api, root, s);
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + cfg.steps.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === cfg.steps.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash(cfg.key, cur + 1);
+  }
+  cfg.steps.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 步");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+  var lg = $("legend");
+  cfg.legend.forEach(function (it) {
+    var s = document.createElement("span");
+    var sw = document.createElement("i");
+    if (it[0] === "info") { sw.className = "icon"; sw.textContent = "i"; } else sw.className = "sw " + it[0];
+    s.appendChild(sw); s.appendChild(document.createTextNode(it[1])); lg.appendChild(s);
+  });
+  show(0);
+  window.__v = window.__v || {};
+  window.__v[cfg.key] = { show: show, cur: function () { return cur; } };
+}
+</script>
+<script>
+/* ===== 第 1 页：一条轨迹怎么来 ===== */
+(function () {
+  var RX = 330, RW = 650, RH = 48, GAP = 8;
+  var ROWS = [
+    ["q", "题目", "修好 src/prime.py 里的 is_prime，让 tests/test_prime.py 全部通过", ""],
+    ["m1", "第 1 轮：策略模型写的工具调用", "read_file(\"src/prime.py\")", "proc"],
+    ["e1", "第 1 轮：环境返回的工具输出", "def is_prime(n): if n < 2: return True ...", "env"],
+    ["m2", "第 2 轮：策略模型写的工具调用", "edit_file(\"src/prime.py\", old=\"return True\", new=\"return False\")", "proc"],
+    ["e2", "第 2 轮：环境返回的工具输出", "已修改 src/prime.py", "env"],
+    ["m3", "第 3 轮：策略模型写的工具调用", "run_tests()", "proc"],
+    ["e3", "第 3 轮：环境返回的工具输出", "tests/test_prime.py: 3 passed", "env"],
+    ["m4", "第 4 轮：策略模型写的工具调用", "finish()", "proc"]
+  ];
+  function rowY(i) { return 20 + i * (RH + GAP); }
+
+  function draw(A, root, s) {
+    var S = { on: ["pol", "env", "score"].concat(ROWS.map(function (r) { return r[0]; })), hot: s.hot || [] };
+    A.box(root, S, "pol", 20, 120, 260, 70, "策略模型", "正在训练；写工具调用", { cn: true, proc: true });
+    A.box(root, S, "env", 20, 300, 260, 70, "环境", "仓库副本 + 执行工具的程序", { cn: true, env: true });
+    for (var i = 0; i < s.rows; i++) {
+      var r = ROWS[i];
+      A.box(root, S, r[0], RX, rowY(i), RW, RH, r[1], r[2], { cn: true, proc: r[3] === "proc", env: r[3] === "env", subCode: true });
+    }
+    // 箭头：最新一行是谁写的
+    if (s.from === "pol") A.arrow(root, "M282 155 H305 V" + (rowY(s.rows - 1) + 24) + " H" + (RX - 4));
+    if (s.from === "env") A.arrow(root, "M282 335 H305 V" + (rowY(s.rows - 1) + 24) + " H" + (RX - 4), "warm");
+    if (s.score) {
+      A.box(root, S, "score", RX, 482, RW, 52, "判分：1", "环境把测试文件恢复原样，重新跑测试：3 passed", { cn: true });
+      A.arrow(root, "M150 372 V508 H" + (RX - 4), "warm");
+    }
+  }
+
+  var STEPS = [
+    { rows: 1, hot: ["q"],
+      say: "PPO 页面里，策略模型读完题目，一次写完整个回答，奖励函数再判分。这一页的任务是修代码：修好 src/prime.py 里的 is_prime，让 tests/test_prime.py 全部通过。策略模型一开始看不到文件内容，也不知道改完以后测试能不能通过，所以一次写不完。agentic RL 让策略模型和环境来回多轮。",
+      code: "messages = [{\"role\": \"user\", \"content\": 题目}]   # 可用工具：read_file、edit_file、run_tests、finish" },
+    { rows: 2, hot: ["pol", "m1"], from: "pol",
+      say: "第 1 轮：策略模型读题目，写出一个工具调用 read_file(\"src/prime.py\")，写完这个工具调用就停下。这一段 token 是策略模型自己写的，和 PPO 页面一样，写的时候每个 token 都记下旧 logp。",
+      code: "action = policy.generate(messages, stop=工具调用结束)   # read_file(\"src/prime.py\")" },
+    { rows: 3, hot: ["env", "e1"], from: "env",
+      say: "环境执行 read_file，把文件内容作为工具输出接到轨迹后面。文件里的 is_prime 在 n < 2 时返回 True，这就是 bug。策略模型下一轮能读到这段工具输出，但这段 token 是环境写的，不是策略模型写的。",
+      code: "observation = env.run(action)   # 文件内容\nmessages += [action, observation]" },
+    { rows: 5, hot: ["m2", "e2"], from: "env",
+      say: "第 2 轮：策略模型读到 bug 所在的那一行，写出 edit_file，把 return True 改成 return False。环境执行修改，返回“已修改 src/prime.py”。每一轮都是这样：策略模型写一个工具调用，环境返回一段工具输出，两段都接到轨迹后面。",
+      code: "action = edit_file(\"src/prime.py\", old=\"return True\", new=\"return False\")\nobservation = \"已修改 src/prime.py\"" },
+    { rows: 7, hot: ["m3", "e3"], from: "env",
+      say: "第 3 轮：策略模型写出 run_tests()，自己先检查修改对不对。环境跑测试，返回“3 passed”。这一轮的工具输出不是判分：它只是策略模型在轨迹里看到的一段信息。",
+      code: "action = run_tests()\nobservation = \"tests/test_prime.py: 3 passed\"" },
+    { rows: 8, hot: ["m4"], from: "pol",
+      say: "第 4 轮：策略模型写出 finish()，表示它认为任务完成了，轨迹到这里结束。从题目到 finish() 的整段 token 叫一条轨迹。如果策略模型一直不写 finish()，轨迹写到最大轮数（例如 8 轮）就被截断。",
+      code: "if action == \"finish()\" or turn == max_turns:   # max_turns 例如 8\n    break" },
+    { rows: 8, hot: ["env", "score"], score: true,
+      say: "轨迹结束后，环境给整条轨迹判分：先把测试文件恢复成原样（防止策略模型改测试骗分），再重新跑一遍测试，3 个测试全部通过，判分是 1。和 PPO 页面一样，判分只有一个数，给的是整条轨迹，而不是某一轮。",
+      code: "env.reset_tests()\nreward = 1.0 if env.run_tests().all_passed else 0.0" },
+    { rows: 8, hot: ["e1", "e2", "e3", "score"], score: true,
+      say: "和 PPO 页面的单轮回答相比，这条轨迹带来三个新问题：轨迹里有一部分 token 是环境写的，训练时该不该算；判分只有一个，要分给 4 轮里策略模型写的所有 token；轨迹有长有短，长的轨迹在损失里占多少。后面三页依次回答这三个问题。",
+      code: "# 下一页：哪些 token 参与训练\n# 第 3 页：判分和优势\n# 第 4 页：策略模型怎么更新" }
+  ];
+
+  function n(title, rows) { return { title: title, rows: rows }; }
+  var NOTES = {
+    pol: n("策略模型", [["是什么", "正在训练的语言模型。每一轮读完整条轨迹到目前为止的内容，写一个工具调用。"], ["写的时候", "每个 token 都记下旧 logp，更新时要用。"]]),
+    env: n("环境", [["是什么", "一份独立的仓库副本，加上执行工具调用的程序。"], ["做什么", "执行策略模型写的工具调用，把结果作为工具输出返回；轨迹结束后重新跑测试判分。"]]),
+    q: n("题目", [["是什么", "任务描述和可用工具的说明。"], ["例子", "修好 src/prime.py 里的 is_prime，让 tests/test_prime.py 全部通过。"]]),
+    m1: n("策略模型写的工具调用", [["是什么", "策略模型这一轮写的 token，以一个工具调用结束。"], ["例子省掉的部分", "真实轨迹里，策略模型通常先写一段思考，再写工具调用。思考也是策略模型写的 token。"]]),
+    e1: n("环境返回的工具输出", [["是什么", "环境执行工具调用后返回的文本，接在轨迹后面，下一轮策略模型能读到。"], ["谁写的", "环境写的，不是策略模型写的。"]]),
+    m2: n("第 2 轮：edit_file", [["是什么", "策略模型把 return True 改成 return False。"]]),
+    e2: n("第 2 轮：工具输出", [["是什么", "环境执行修改后返回的确认信息。"]]),
+    m3: n("第 3 轮：run_tests", [["是什么", "策略模型在轨迹里自己跑测试，检查修改。"]]),
+    e3: n("第 3 轮：工具输出", [["是什么", "测试结果。它只是轨迹里的一段信息，不是判分。"]]),
+    m4: n("第 4 轮：finish", [["是什么", "策略模型宣布任务完成，轨迹结束。"], ["没写 finish 时", "轨迹写到最大轮数被截断，通常判 0 分。"]]),
+    score: n("判分", [["是什么", "环境给整条轨迹的一个数：测试全部通过 1，否则 0。"], ["为什么恢复测试文件", "策略模型在轨迹里可能改动测试文件；判分前恢复原样，只认被修好的源代码。"]])
+  };
+
+  makeView({ P: "o-", key: "overview", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["proc", "策略模型写的 token"], ["env", "环境写的 token"], ["hot", "这一步讲到的部分"], ["info", "点框看说明"]] });
+})();
+
+/* ===== 第 2 页：哪些 token 参与训练 ===== */
+(function () {
+  var BX = 150, BW = 820, BY = 34;
+  var COL = { seg: 40, who: 330, n: 470, logp: 590, mask: 760 };
+  var WHO = { prompt: "题目", model: "策略模型", env: "环境" };
+  var FILL = { prompt: "var(--line)", model: "var(--proc)", env: "color-mix(in srgb, var(--warm) 13%, var(--panel))" };
+
+  function draw(A, root, s) {
+    // 上面：整条轨迹按 token 个数画成一条
+    A.mk("text", { "class": "glabel", x: BX - 10, y: BY + 18, "text-anchor": "end" }, root, "整条轨迹");
+    var x = BX;
+    D.segs.forEach(function (sg) {
+      var w = sg[2] / D.tot * BW;
+      A.mk("rect", { "class": "seg", x: x, y: BY, width: w, height: 26, fill: FILL[sg[1]] }, root);
+      if (s.maskBar) {
+        var m = sg[1] === "model" ? 1 : 0;
+        A.mk("rect", { "class": "seg", x: x, y: BY + 32, width: w, height: 20, fill: m ? "var(--accent)" : "var(--panel)" }, root);
+        A.mk("text", { "class": "glabel", x: x + w / 2, y: BY + 47, "text-anchor": "middle", style: m ? "fill:#fff" : "" }, root, String(m));
+      }
+      x += w;
+    });
+    if (s.maskBar) A.mk("text", { "class": "glabel", x: BX - 10, y: BY + 47, "text-anchor": "end" }, root, "loss mask");
+    A.mk("text", { "class": "sub", x: BX, y: BY - 10 }, root, "共 " + D.tot + " 个 token，从左往右是写出的时间顺序");
+
+    // 下面：每一段一行
+    var y0 = 110, rh = 40;
+    var head = [["seg", "片段"], ["n", "token 个数"]];
+    if (s.cols >= 2) head.push(["who", "谁写的"]);
+    if (s.cols >= 3) head.push(["logp", "有没有旧 logp"]);
+    if (s.cols >= 4) head.push(["mask", "loss mask"]);
+    head.forEach(function (h) { A.mk("text", { "class": "gtitle", x: COL[h[0]], y: y0 }, root, h[1]); });
+    D.segs.forEach(function (sg, i) {
+      var y = y0 + 14 + i * rh;
+      var hot = s.hotKind && s.hotKind.indexOf(sg[1]) >= 0;
+      A.mk("rect", { x: 30, y: y, width: 940, height: rh - 6, rx: 6, fill: hot ? "color-mix(in srgb, var(--warm) 18%, var(--panel))" : "var(--panel)", stroke: hot ? "var(--warm)" : "var(--line)" }, root);
+      A.mk("rect", { x: 30, y: y, width: 6, height: rh - 6, fill: FILL[sg[1]] }, root);
+      var ty = y + 22;
+      A.mk("text", { "class": "titlecn", x: COL.seg, y: ty }, root, sg[0]);
+      A.mk("text", { "class": "title", x: COL.n, y: ty }, root, String(sg[2]));
+      if (s.cols >= 2) A.mk("text", { "class": "titlecn", x: COL.who, y: ty }, root, WHO[sg[1]]);
+      if (s.cols >= 3) A.mk("text", { "class": "titlecn", x: COL.logp, y: ty }, root, sg[1] === "model" ? "有" : "没有");
+      if (s.cols >= 4) {
+        var shown = s.maskKinds.indexOf(sg[1]) >= 0;
+        if (shown) A.mk("text", { "class": "title", x: COL.mask, y: ty }, root, sg[1] === "model" ? "1" : "0");
+      }
+    });
+  }
+
+  var STEPS = [
+    { cols: 1,
+      say: "训练时，第 1 页那条轨迹被当成一整行 token：题目、4 段策略模型写的工具调用、3 段环境返回的工具输出，按写出的时间顺序排在一起，一共 " + D.tot + " 个 token。策略模型更新时要算每个 token 的损失，问题是：这 " + D.tot + " 个 token 都该算吗？",
+      code: "input_ids = concat(题目, 第 1 轮工具调用, 第 1 轮工具输出, ..., 第 4 轮工具调用)   # " + D.tot + " 个 token" },
+    { cols: 2, hotKind: ["model", "env"],
+      say: "先看每一段是谁写的。题目是任务给的；4 段工具调用是策略模型写的，一共 " + D.model + " 个 token；3 段工具输出是环境写的，一共 " + D.env + " 个 token。在 PPO 页面的单轮回答里，除了题目，剩下的 token 都是策略模型写的；这里不一样，策略模型写的 token 和环境写的 token 交替出现。",
+      code: "# 策略模型写的：" + D.model + " 个 token；环境写的：" + D.env + " 个 token；题目：60 个 token" },
+    { cols: 3, hotKind: ["model"],
+      say: "策略模型写工具调用时，每个 token 都是它从自己给出的概率里选出来的，所以每个 token 都有旧 logp。PPO 和 GRPO 的更新方法都建立在这件事上：比较新 logp 和旧 logp，选得好的 token 推高，选得不好的压低。",
+      code: "old_logp[策略模型写的 token] = 写的时候记下的 logp" },
+    { cols: 4, maskKinds: ["env"], hotKind: ["env"],
+      say: "工具输出是环境写的：文件内容由仓库决定，测试结果由代码决定，策略模型没有选过这些 token，也就没有旧 logp。如果把它们也算进损失，等于训练策略模型去预测文件内容和测试结果，这不是策略模型要学的事，还会把训练信号弄乱。所以工具输出的 token 在 loss mask 里记 0：策略模型读它们，但不在它们上面算损失。",
+      code: "loss_mask[工具输出的 token] = 0" },
+    { cols: 4, maskKinds: ["env", "prompt"], hotKind: ["prompt"],
+      say: "题目也是这样：题目不是策略模型写的，loss mask 记 0。这一点和 PPO 页面的单轮回答相同，那里也只在回答的 token 上算损失。",
+      code: "loss_mask[题目的 token] = 0" },
+    { cols: 4, maskKinds: ["env", "prompt", "model"], hotKind: ["model"], maskBar: true,
+      say: "策略模型写的 4 段工具调用，loss mask 记 1。最后的 loss mask 是一行 0 和 1，和轨迹的 " + D.tot + " 个 token 一一对应：只有 " + D.model + " 个 token 是 1。后面算损失时，每个 token 的损失先乘以它的 loss mask，再加起来，所以只有这 " + D.model + " 个 token 影响更新。",
+      code: "loss_mask = [0]*60 + [1]*15 + [0]*45 + [1]*40 + [0]*8 + [1]*10 + [0]*12 + [1]*6   # " + D.model + " 个 1\nloss = (per_token_loss * loss_mask).sum() / loss_mask.sum()" }
+  ];
+
+  makeView({ P: "m-", key: "mask", steps: STEPS, notes: {}, draw: draw,
+    legend: [["proc", "策略模型写的 token"], ["env", "环境写的 token"], ["hi", "这一步讲到的片段"]] });
+})();
+
+/* ===== 第 3 页：判分和优势（同一个任务跑一组轨迹） ===== */
+(function () {
+  var TRAJ = [
+    { calls: ["read_file", "edit_file", "run_tests", "finish"], end: "测试全部通过", n: D.n[0] },
+    { calls: ["read_file", "edit_file", "finish"], end: "改错了，没跑测试就 finish", n: D.n[1] },
+    { calls: ["read_file", "edit_file", "run_tests", "edit_file", "run_tests", "finish"], end: "第一次改错，测试失败后改对", n: D.n[2] },
+    { calls: ["run_tests", "read_file", "run_tests", "read_file", "run_tests", "read_file", "run_tests", "read_file"], end: "到 8 轮也没写 finish，被截断", n: D.n[3] }
+  ];
+  var LX = 100, SX = 840, AX = 920, Y0 = 60, RH = 74;
+
+  function mini(A, root, x, y, t, hot, val) {
+    var w = t.length * 6.8 + 14;
+    A.mk("rect", { x: x, y: y, width: w, height: 22, rx: 5, fill: hot ? "var(--accent)" : "var(--proc)", stroke: hot ? "var(--accent)" : "var(--line)" }, root);
+    A.mk("text", { x: x + w / 2, y: y + 15, "text-anchor": "middle", "font-family": "var(--font-code)", "font-size": 11.5, fill: hot ? "#fff" : "var(--ink)" }, root, t);
+    if (val) A.mk("text", { "class": "glabel", x: x + w / 2, y: y + 38, "text-anchor": "middle", fill: "var(--accent)" }, root, val);
+    return w;
+  }
+
+  function draw(A, root, s) {
+    A.mk("text", { "class": "gtitle", x: LX, y: 24 }, root, "同一个任务，策略模型写出 4 条轨迹（每个方块是策略模型写的一个工具调用）");
+    if (s.score) A.mk("text", { "class": "gtitle", x: SX, y: 44, "text-anchor": "middle" }, root, "判分");
+    if (s.adv) A.mk("text", { "class": "gtitle", x: AX + 20, y: 44, "text-anchor": "middle" }, root, "优势");
+    TRAJ.forEach(function (t, i) {
+      var y = Y0 + i * RH;
+      var hot = s.hotT === i;
+      A.mk("rect", { x: 20, y: y - 6, width: 965, height: RH - 12, rx: 8, fill: hot ? "color-mix(in srgb, var(--warm) 14%, var(--panel))" : "var(--panel)", stroke: hot ? "var(--warm)" : "var(--line)" }, root);
+      A.mk("text", { "class": "titlecn", x: 32, y: y + 16 }, root, "轨迹 " + (i + 1));
+      var x = LX;
+      t.calls.forEach(function (c) { x += mini(A, root, x, y, c, s.spread && hot, s.spread && hot ? "+" + D.A[i].toFixed(3) : "") + 5; });
+      A.mk("text", { "class": "sub", x: LX, y: y + 44 }, root, s.spread && hot ? "" : t.end);
+      if (s.score) A.mk("text", { "class": "title", x: SX, y: y + 18, "text-anchor": "middle" }, root, String(D.R[i]));
+      if (s.adv) A.mk("text", { "class": "title", x: AX + 20, y: y + 18, "text-anchor": "middle", fill: D.A[i] > 0 ? "var(--good)" : "var(--bad)" }, root, fmt(D.A[i], 3));
+    });
+    var yb = Y0 + 4 * RH + 6;
+    if (s.mean) A.mk("text", { "class": "titlecn", x: LX, y: yb + 8 }, root, "平均判分 = (1 + 0 + 1 + 0) ÷ 4 = " + D.mean.toFixed(1));
+    if (s.adv) A.mk("text", { "class": "titlecn", x: LX, y: yb + 34 }, root, "标准差 = " + D.std.toFixed(3) + "　　优势 = (判分 − 平均判分) ÷ 标准差");
+  }
+
+  var STEPS = [
+    { hotT: 0,
+      say: "第 1 页那条轨迹的判分是 1。可是光有一个 1，看不出它是好是坏：如果策略模型做这个任务本来就十次有九次能过，1 很正常；如果本来很少能过，1 就很难得。PPO 页面用价值模型给出“本来预计能拿多少”。agentic RL 里常用 GRPO 的做法：不用价值模型，让策略模型对同一个任务写一组轨迹，这里是 4 条，用这 4 条互相比较。",
+      code: "trajectories = [rollout(policy, env_copy(task)) for _ in range(4)]   # 每条轨迹用一份独立的仓库副本" },
+    { score: true,
+      say: "环境给 4 条轨迹分别判分。轨迹 1 就是第 1 页那条，测试全部通过，判 1。轨迹 2 改错了，没跑测试就写了 finish，判 0。轨迹 3 第一次改错，跑测试失败后又改对了，判 1。轨迹 4 一直在读文件和跑测试，到 8 轮也没写 finish，被截断，判 0。",
+      code: "rewards = [1, 0, 1, 0]" },
+    { score: true, mean: true,
+      say: "4 个判分的平均数是 0.5。判分高于平均数的轨迹，比这个任务上策略模型的一般水平好；低于平均数的，比一般水平差。这个平均数起的作用，和 PPO 页面里价值模型的预计一样，都是“本来预计能拿多少”。",
+      code: "mean = rewards.mean()   # 0.5" },
+    { score: true, mean: true, adv: true,
+      say: "每条轨迹的优势 = (判分 − 平均判分) ÷ 标准差。4 个判分的标准差是 " + D.std.toFixed(3) + "，所以判 1 的轨迹优势是 (1 − 0.5) ÷ " + D.std.toFixed(3) + " = " + fmt(D.A[0], 3) + "，判 0 的轨迹优势是 " + fmt(D.A[1], 3) + "。除以标准差，是为了让不同任务算出的优势大小差不多：有的任务判分差得大，有的差得小。",
+      code: "advantages = (rewards - mean) / (rewards.std() + 1e-4)   # [" + D.A.map(function (v) { return fmt(v, 3); }).join(", ") + "]" },
+    { score: true, mean: true, adv: true, hotT: 2, spread: true,
+      say: "一条轨迹只有一个优势，这条轨迹里策略模型写的每个 token 都用这同一个数，不分是第几轮。看轨迹 3：第 2 轮那次改错的 edit_file 也拿到了 +" + D.A[2].toFixed(3) + "，因为整条轨迹最后通过了。单看这一条，改错的那一步被推高了；但在很多任务、很多组轨迹里，改错的写法更常出现在判 0 的轨迹里，所以平均下来它被压低的次数更多。",
+      code: "token_advantages[轨迹 3 里策略模型写的每个 token] = " + fmt(D.A[2], 3) },
+    { score: true, mean: true, adv: true,
+      say: "如果一组 4 条轨迹的判分都一样，比如全是 1 或全是 0，判分减平均数全是 0，4 个优势都是 0，这个任务在这一步不推动任何更新。所以任务要难度合适：太简单的全过，太难的全不过，都不产生学习信号。",
+      code: "# rewards = [1, 1, 1, 1] → advantages = [0, 0, 0, 0]" }
+  ];
+
+  makeView({ P: "a-", key: "advantage", steps: STEPS, notes: {}, draw: draw,
+    legend: [["proc", "策略模型写的工具调用"], ["hi", "这一步讲到的轨迹"]] });
+})();
+
+/* ===== 第 4 页：策略模型怎么更新 ===== */
+(function () {
+  var TX = 150, CW = 132, Y0 = 30;
+  function sumStr(arr, d) { return arr.map(function (v, i) { return i === 0 ? fmt(v, d) : (v < 0 ? " − " : " + ") + fmt(Math.abs(v), d); }).join(""); }
+  var COLS = ["策略模型写的 token 个数", "优势", "每个 token 的损失", "这条轨迹的损失总和", "按 token 平均时的权重", "按轨迹平均时的权重"];
+  var SHORT = ["token 个数", "优势", "每个 token 的损失", "损失总和", "权重（按 token）", "权重（按轨迹）"];
+
+  function draw(A, root, s) {
+    var nc = s.cols;
+    var M = [0, 1, 2, 3].map(function (i) {
+      var row = [String(D.n[i]), fmt(D.A[i], 3), fmt(D.per[i], 3), fmt(D.total[i], 2), D.wTok[i].toFixed(3), D.wTraj[i].toFixed(3)];
+      return row.slice(0, nc);
+    });
+    A.grid(root, TX, Y0, M, { rows: ["轨迹 1", "轨迹 2", "轨迹 3", "轨迹 4"], cols: SHORT.slice(0, nc), cw: CW, hiCols: s.hiCol !== undefined ? [s.hiCol] : [], hiRow: s.hiRow });
+    var y = Y0 + 18 + 4 * 28 + 34;
+    (s.lines || []).forEach(function (t) { A.mk("text", { "class": "titlecn", x: TX - 100, y: y }, root, t); y += 28; });
+  }
+
+  var STEPS = [
+    { cols: 3, hiCol: 2,
+      say: "每个策略模型写的 token 的损失，算法和 PPO 页面“策略怎么更新”那一页相同：比率 = e^(新 logp − 旧 logp)，比率限制在 0.8 到 1.2，乘以优势，取较小的再加负号。更新刚开始时，策略模型还没变，比率是 1，所以每个 token 的损失就是 −优势：判 1 的轨迹里每个 token 是 " + fmt(D.per[0], 3) + "，判 0 的是 " + fmt(D.per[1], 3) + "。环境写的 token 和题目的 token 的 loss mask 是 0，不算损失。",
+      code: "ratio = torch.exp(new_logp - old_logp)\nper_token_loss = -torch.min(ratio * adv, torch.clamp(ratio, 0.8, 1.2) * adv)\nper_token_loss = per_token_loss * loss_mask   # 只留策略模型写的 token" },
+    { cols: 4, hiCol: 3,
+      say: "4 条轨迹里策略模型写的 token 个数不一样：轨迹 1 是 " + D.n[0] + " 个，轨迹 4 一直写到被截断，有 " + D.n[3] + " 个。每条轨迹的损失总和 = 每个 token 的损失 × token 个数，例如轨迹 4 是 " + fmt(D.per[3], 3) + " × " + D.n[3] + " = " + fmt(D.total[3], 2) + "。剩下的问题是：怎样把 4 条轨迹的损失合成一个数。",
+      code: "traj_loss_sum = (per_token_loss * loss_mask).sum(dim=1)   # 每条轨迹一个数" },
+    { cols: 5, hiCol: 4, lines: ["按 token 平均：(" + sumStr(D.total, 2) + ") ÷ " + D.sumN + " = " + fmt(D.tok, 5)],
+      say: "第一种算法：把 4 条轨迹里所有策略模型写的 token 放在一起平均。损失总和加起来除以 token 总数 " + D.sumN + "，得到 " + fmt(D.tok, 5) + "。这样每个 token 的分量一样，轨迹越长，在损失里占的分量越大：轨迹 4 占 " + D.wTok[3].toFixed(3) + "，轨迹 2 只占 " + D.wTok[1].toFixed(3) + "。",
+      code: "loss = (per_token_loss * loss_mask).sum() / loss_mask.sum()" },
+    { cols: 6, hiCol: 5, lines: ["按 token 平均：(" + sumStr(D.total, 2) + ") ÷ " + D.sumN + " = " + fmt(D.tok, 5), "按轨迹平均：先在每条轨迹里平均，再 4 条平均：(" + sumStr(D.per, 3) + ") ÷ 4 = " + fmt(D.traj, 3)],
+      say: "第二种算法：先在每条轨迹里把 token 的损失平均，再把 4 条轨迹的结果平均。这样每条轨迹的分量一样，都是 0.25，和轨迹长短无关；代价是长轨迹里每个 token 分到的分量变小。",
+      code: "loss = ((per_token_loss * loss_mask).sum(dim=1) / loss_mask.sum(dim=1)).mean()" },
+    { cols: 6, hiRow: 3, lines: ["按 token 平均：(" + sumStr(D.total, 2) + ") ÷ " + D.sumN + " = " + fmt(D.tok, 5), "按轨迹平均：先在每条轨迹里平均，再 4 条平均：(" + sumStr(D.per, 3) + ") ÷ 4 = " + fmt(D.traj, 3)],
+      say: "agentic RL 的轨迹长短差别很大，这个选择会影响学到什么。按 token 平均时，被截断的轨迹 4 最长，占 " + D.wTok[3].toFixed(3) + "，它的优势是负数，所以“一直读文件、不写 finish”这种写法被压得最重；按轨迹平均时，它和其他轨迹一样占 0.25。两种算法算出的损失都接近 0，但这不代表没有更新：每个 token 的梯度由它自己的优势决定，判 1 的轨迹里的 token 被推高，判 0 的被压低，只是正负加起来抵消了。",
+      code: "# 损失的数值接近 0，梯度不为 0：\n# 判 1 的轨迹：每个 token 的 logp 被推高；判 0 的轨迹：被压低" },
+    { cols: 6, lines: ["然后：同一组轨迹用几遍后，策略模型重新对新的任务写轨迹"],
+      say: "用这个损失更新策略模型以后，同一组轨迹可以再用几遍，比率离开 1，截断开始起作用，和 PPO 页面一样。用完以后，更新过的策略模型重新对新的任务写轨迹：每条轨迹都要和环境来回多轮，所以写轨迹通常比更新本身花的时间多得多。",
+      code: "for step in range(num_steps):\n    trajectories = rollout(policy, tasks)   # 多轮，和环境来回\n    rewards = [env.judge(t) for t in trajectories]   # 每条轨迹 1 或 0\n    advantages = (rewards - rewards.mean()) / (rewards.std() + 1e-4)   # 按每组 4 条算\n    update(policy, trajectories, advantages, loss_mask)" }
+  ];
+
+  makeView({ P: "u-", key: "update", steps: STEPS, notes: {}, draw: draw,
+    legend: [["hi", "这一步算出或讲到的数"]] });
+})();
+
+</script>
+<script>
+(function () {
+  var TABS = [{"key": "overview", "p": "o", "title": "Agentic RL 整体：一条轨迹怎么来"}, {"key": "mask", "p": "m", "title": "Agentic RL 哪些 token 参与训练"}, {"key": "advantage", "p": "a", "title": "Agentic RL 判分和优势"}, {"key": "update", "p": "u", "title": "Agentic RL 策略模型怎么更新"}], active = TABS[0].key;
+  window.__setHash = function (key, n) {
+    if (key !== active) return;
+    try { history.replaceState(null, "", "#" + key + "-" + n); } catch (e) {}
+  };
+  function activate(key, step) {
+    active = key;
+    TABS.forEach(function (t) {
+      document.getElementById(t.p + "-view").hidden = (t.key !== key);
+      document.getElementById("tab-" + t.key).setAttribute("aria-selected", t.key === key ? "true" : "false");
+      if (t.key === key) document.title = t.title;
+    });
+    var v = window.__v[key];
+    v.show(step === undefined ? v.cur() : step - 1);
+  }
+  TABS.forEach(function (t) {
+    document.getElementById("tab-" + t.key).addEventListener("click", function () { activate(t.key); window.scrollTo(0, 0); });
+  });
+  function fromHash() {
+    var m = /^#([a-z]+)(?:-(\d+))?$/.exec(location.hash);
+    if (m && window.__v[m[1]]) activate(m[1], m[2] ? parseInt(m[2], 10) : undefined);
+    else activate(active);
+  }
+  window.addEventListener("hashchange", fromHash);
+  fromHash();
+})();
+</script>
+</body>
+</html>

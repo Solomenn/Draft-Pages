@@ -1,0 +1,2511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>POPO-OPD-Relay 与 GRPOTrainer 逐步讲解 (Copy)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #16202b; --muted: #5d6b7a; --line: #c9d1da;
+    --accent: #0b6e8a; --warm: #a8650c; --proc: #e3f1f5; --good: #2f8a4f; --bad: #b42318;
+    --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f151b; --panel: #161e26; --ink: #e6edf3; --muted: #93a1b0; --line: #2c3844;
+      --accent: #4cc0df; --warm: #f0b44c; --proc: #16303a; --good: #62d48a; --bad: #ff7b72; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+  .wrap { padding: 24px 16px 40px; }
+  .view { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0; text-wrap: balance; }
+  .gist { margin: -6px 0 0; font-size: 16px; line-height: 1.7; max-width: 48em; }
+
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  svg.diagram { display: block; width: 100%; height: auto; }
+  .colhead { fill: var(--muted); font-size: 13px; font-weight: 500; }
+
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  .title { fill: var(--ink); font-family: var(--font-code); font-size: 13.5px; font-weight: 600; }
+  .sub { fill: var(--muted); font-size: 12.5px; }
+  .node { opacity: 0.22; transition: opacity .45s; }
+  .node.on, .node.sel { opacity: 1; }
+  .node.hot .box { stroke: var(--accent); stroke-width: 3; }
+  .node.sel .box { stroke: var(--ink); stroke-width: 3; stroke-dasharray: 7 4; }
+  .node.proc .box { fill: var(--proc); }
+  .clickable { cursor: pointer; outline: none; }
+  .clickable:hover .box { stroke: var(--ink); }
+  .clickable:focus-visible .box { stroke: var(--ink); stroke-width: 3; }
+
+  .info circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; }
+  .info text { fill: var(--muted); font-family: var(--font-code); font-size: 12px; font-weight: 600; }
+  .clickable:hover .info circle, .sel .info circle { fill: var(--ink); stroke: var(--ink); }
+  .clickable:hover .info text, .sel .info text { fill: var(--panel); }
+
+  .kind path, .legend path { fill: none; stroke: var(--muted); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+  .proc .kind path, .legend .k-process path { stroke: var(--accent); }
+
+  .arrow { fill: none; stroke: var(--accent); stroke-width: 2.4; opacity: 0; transition: opacity .45s; }
+  .arrow.show { opacity: 1; }
+
+  .packet { transition: transform .8s cubic-bezier(.4,.1,.2,1), opacity .35s; opacity: 0; pointer-events: none; }
+  .packet.show { opacity: 1; }
+  .packet rect { fill: var(--warm); }
+  .packet text { fill: #fff; font-family: var(--font-code); font-size: 11.5px; font-weight: 600; }
+  .packet.good rect { fill: var(--good); }
+  .packet.bad rect { fill: var(--bad); }
+  .packet.drop rect { fill: var(--panel); stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 4 3; }
+  .packet.drop text { fill: var(--muted); text-decoration: line-through; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .packet text { fill: #14100a; } }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; color: var(--muted); font-size: 13.5px; margin-top: -6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend svg { width: 16px; height: 16px; }
+
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--ink); border-radius: 14px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .note[hidden] { display: none; }
+  .note-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .note-title { margin: 0; font-family: var(--font-code); font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+  .note-close { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .note-close:hover { border-color: var(--ink); }
+  .note dl { margin: 0; display: grid; grid-template-columns: 8.5em 1fr; gap: 10px 16px; }
+  .note dt { color: var(--muted); font-size: 14px; padding-top: 1px; }
+  .note dd { margin: 0; font-size: 15px; line-height: 1.7; min-width: 0; }
+  .note dd p { margin: 0; }
+  .note dd p + p { margin-top: 4px; }
+  .scope { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; margin-right: 8px; vertical-align: 1px; border: 1.5px solid currentColor; }
+  .scope.project { color: var(--accent); }
+  .scope.machine { color: var(--warm); }
+  .scope.hub { color: var(--good); }
+  .path { font-family: var(--font-code); font-size: 13.5px; overflow-wrap: anywhere; background: var(--bg); padding: 1px 6px; border-radius: 6px; }
+  .hint { color: var(--muted); font-size: 13.5px; }
+  .sample { margin: 0; font-family: var(--font-code); font-size: 12.5px; line-height: 1.55; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow: auto; }
+  .sample-cap { color: var(--muted); font-size: 13.5px; margin-bottom: 4px !important; }
+
+  .caption { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-height: 140px; display: flex; flex-direction: column; gap: 12px; }
+  .caption .say { margin: 0; font-size: 19px; line-height: 1.65; font-weight: 500; max-width: 42em; text-wrap: pretty; }
+  .caption .code { margin: 0; font-family: var(--font-code); font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+  .nav { display: flex; align-items: center; gap: 14px; }
+  .nav button.arrow-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .nav button.arrow-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .nav button.arrow-btn:disabled { opacity: .35; cursor: default; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .dots { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; justify-content: center; }
+  .dots button { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); background: var(--panel); cursor: pointer; }
+  .dots button.done { background: var(--line); }
+  .dots button.now { background: var(--accent); border-color: var(--accent); transform: scale(1.25); }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; min-width: 3.5em; text-align: right; flex: none; }
+
+  /* 翻页箭头：宽屏时固定在页面左右两侧、垂直居中；窄屏（手机）仍在底部 */
+  @media (min-width: 700px) {
+    .nav button.arrow-btn { position: fixed; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+    .nav .prev { left: 8px; }
+    .nav .next { right: 8px; }
+    .view { padding-inline: 64px; }
+  }
+  @media (min-width: 1200px) {
+    .view { padding-inline: 0; }
+    .nav .prev { left: calc(50% - 592px); }
+    .nav .next { right: calc(50% - 592px); }
+  }
+  @media (max-width: 640px) { .note dl { grid-template-columns: 1fr; gap: 2px 0; } .note dd { margin-bottom: 8px; } }
+  @media (prefers-reduced-motion: reduce) { .node, .arrow, .packet { transition: none; } }
+
+  .procframe { fill: none; stroke: var(--accent); stroke-dasharray: 6 4; stroke-width: 1.5; }
+  .node.proc .info, .node.proc .kind { cursor: pointer; }
+  .node.proc .box.procframe { fill: none; }
+  .zonebox { fill: var(--bg); }
+  .chip rect { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+  .chiptext { font-family: var(--font-code); font-size: 11px; fill: var(--muted); }
+  .chip.found rect { fill: var(--accent); stroke: var(--accent); }
+  .chip.found .chiptext { fill: #fff; font-weight: 600; }
+  .chip.off { opacity: .45; }
+  .glabel { fill: var(--ink); font-size: 13px; font-weight: 500; }
+  .cell rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+  .cell text { font-family: var(--font-code); font-size: 11.5px; fill: var(--muted); }
+  .cell.txt text { font-family: var(--font-body); font-size: 11.5px; fill: var(--ink); }
+  .cell.pos rect { fill: var(--accent); stroke: var(--accent); }
+  .cell.pos text { fill: #fff; font-weight: 600; }
+  .cell.neg rect { fill: color-mix(in srgb, var(--warm) 22%, var(--panel)); stroke: var(--warm); }
+  .cell.neg text { fill: var(--warm); font-weight: 600; }
+  .padcell { fill: var(--line); }
+  .realq { fill: color-mix(in srgb, var(--warm) 35%, var(--panel)); }
+  .reala { fill: color-mix(in srgb, var(--accent) 35%, var(--panel)); }
+  .cell rect.padbg { fill: var(--line); stroke: none; }
+  .cell rect.realq { fill: var(--panel); stroke: none; }
+  .cell rect.reala { fill: color-mix(in srgb, var(--accent) 30%, var(--panel)); stroke: none; }
+  .slot rect { fill: var(--panel); stroke: var(--line); stroke-dasharray: 4 3; }
+  .slot text { font-size: 12px; fill: var(--muted); }
+  .slot.full rect { stroke-dasharray: none; }
+  .slot.used rect { fill: color-mix(in srgb, var(--accent) 18%, var(--panel)); }
+  .slot.cur rect { stroke: var(--accent); stroke-width: 2.5; }
+  .slot.cur text { fill: var(--ink); font-weight: 600; }
+  .gradbg { fill: var(--bg); stroke: var(--line); }
+  .gradfill { fill: var(--accent); }
+  .link { fill: none; stroke: var(--accent); stroke-width: 2.2; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .sw.pos { background: var(--accent); border-color: var(--accent); }
+  .sw.neg { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); border-color: var(--warm); }
+  .scope.env { color: var(--good); }
+  .scope.memory { color: var(--warm); }
+  .k-function path { stroke: var(--muted); }
+
+  #c-view .chip rect { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+  #c-view .chip text { fill: var(--ink); font-family: var(--font-code); font-size: 11.5px; }
+  #c-view .chip.found rect { fill: var(--accent); stroke: var(--accent); }
+  #c-view .chip.found text { fill: #fff; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) #c-view .chip.found text { fill: #06212a; } }
+  .node.miss .box { stroke-dasharray: 6 4; stroke: var(--muted); }
+  .misslabel { fill: var(--muted); font-size: 12px; }
+  .node.dim { opacity: .3; }
+  .attr { fill: var(--muted); font-family: var(--font-code); font-size: 12px; }
+  .attr.new { fill: var(--accent); font-weight: 600; }
+  .link { fill: none; stroke: var(--accent); stroke-width: 2.2; }
+  .link.warm { stroke: var(--warm); }
+  .link.back { stroke: var(--muted); stroke-dasharray: 5 4; }
+  .linklabel { fill: var(--accent); font-family: var(--font-code); font-size: 11.5px; font-weight: 600; }
+  .linklabel.warm { fill: var(--warm); }
+  .linklabel.muted { fill: var(--muted); }
+  .trace { fill: var(--ink); font-family: var(--font-code); font-size: 11px; }
+  .traceby { fill: var(--muted); font-size: 11.5px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .sw.found { background: var(--accent); border-color: var(--accent); }
+  .sw.miss { border: 1.5px dashed var(--muted); }
+  .scope.env { color: var(--good); }
+  .scope.memory { color: var(--warm); }
+  .inherit { stroke: var(--line); stroke-width: 2; }
+  #c-view .packet text { font-family: var(--font-body); font-size: 12.5px; }
+
+  #d-view .val { fill: var(--ink); font-family: var(--font-code); font-size: 12.5px; }
+  #d-view .cell rect { transition: fill .4s; }
+  /* 每组那一排：平时不画框，只在这一步讲到它（hot）、换进旧组（replay）或点开说明（sel）时画 */
+  #d-view .box.grow { fill: none; stroke: transparent; }
+  #d-view .clickable:hover .box.grow { stroke: var(--line); }
+  #d-view .node.hot .box.grow { stroke: var(--accent); stroke-width: 2.5; }
+  #d-view .node.replay .box.grow { stroke: var(--warm); stroke-width: 2.5; stroke-dasharray: 6 4; }
+  #d-view .node.sel .box.grow { stroke: var(--ink); stroke-width: 2.5; stroke-dasharray: 7 4; }
+  /* 缓冲区的位置：和 GRPOTrainer 页 _buffered_inputs 的格子一样，空的用虚线，放了东西的填浅色 */
+  #d-view .box.bslot { fill: color-mix(in srgb, var(--accent) 18%, var(--panel)); }
+  #d-view .bslotg.empty .box.bslot { fill: var(--panel); stroke-dasharray: 4 3; }
+  #d-view .bslotg.empty .title { fill: var(--muted); font-family: var(--font-body); font-weight: 400; font-size: 12.5px; }
+  .sw.zero { background: var(--panel); }
+  #e-view .cell.clip rect { stroke: var(--warm); stroke-width: 2; stroke-dasharray: 4 3; }
+  #e-view .rowhot { fill: none; stroke: var(--accent); stroke-width: 2; }
+  #e-view .cell.num text { font-size: 10.5px; }
+
+  .view[hidden] { display: none; }
+
+  /* 顶部切换按钮 */
+  .tabs { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 14px 16px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .tab { font-family: var(--font-body); font-size: 14px; padding: 7px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .tab:hover { border-color: var(--accent); }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0f151b; } }
+
+  /* ===== 交给模型与模型输出（f-view） ===== */
+  :root { --hl: #fff1cc; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --hl: #4a3b12; } }
+  #f-view { line-height: 1.7; gap: 22px; }
+  #f-view h2 { font-size: 17px; margin: 0 0 10px; }
+  #f-view .gist { font-size: 16px; margin: 0; max-width: 50em; }
+  #f-view .io-sub { color: var(--muted); font-size: 14px; margin: 0; }
+  #f-view .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+  #f-view code, #f-view .mono { font-family: var(--font-code); font-size: 13px; }
+  #f-view .calls { display: grid; gap: 12px; }
+  #f-view .call { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  #f-view .call-head { display: flex; gap: 10px; align-items: baseline; padding: 10px 14px; background: var(--proc); flex-wrap: wrap; }
+  #f-view .num { font-family: var(--font-code); font-weight: 700; color: var(--accent); }
+  #f-view .call-head b { font-size: 15px; }
+  #f-view .call-head .where { color: var(--muted); font-size: 13px; font-family: var(--font-code); }
+  #f-view .flow { display: grid; grid-template-columns: 1fr 28px 1fr 28px 1fr; align-items: stretch; padding: 12px 14px; gap: 6px; }
+  #f-view .io-cell { border-radius: 8px; padding: 8px 10px; font-size: 14px; }
+  #f-view .io-cell .lab { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  #f-view .in { background: color-mix(in srgb, var(--warm) 12%, transparent); }
+  #f-view .out { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  #f-view .use { background: color-mix(in srgb, var(--muted) 10%, transparent); }
+  #f-view .arr { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+  @media (max-width: 760px) { #f-view .flow { grid-template-columns: 1fr; } #f-view .arr { transform: rotate(90deg); height: 18px; } }
+  #f-view pre.prompt { white-space: pre-wrap; word-break: break-word; margin: 0; padding: 14px; border-radius: 10px;
+    background: var(--bg); border: 1px solid var(--line); font-family: var(--font-code); font-size: 13px; line-height: 1.65; }
+  #f-view mark { background: var(--hl); color: inherit; padding: 0 2px; border-radius: 3px; }
+  #f-view .tail { color: var(--accent); font-weight: 700; }
+  #f-view .answers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+  @media (max-width: 860px) { #f-view .answers { grid-template-columns: 1fr; } }
+  #f-view .ans { border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; }
+  #f-view .ans-head { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  #f-view .ans-head b { display: block; font-size: 14.5px; }
+  #f-view .ans-head span { word-break: break-all; font-size: 12.5px; color: var(--muted); font-family: var(--font-code); }
+  #f-view .ans pre { margin: 0; padding: 12px; white-space: pre-wrap; word-break: break-word; font-family: var(--font-code);
+    font-size: 12.5px; line-height: 1.6; flex: 1; max-height: 300px; overflow: auto; }
+  #f-view .verdict { padding: 9px 12px; font-size: 13.5px; border-top: 1px solid var(--line); }
+  #f-view .verdict .tag { font-weight: 700; margin-right: 6px; }
+  #f-view .ok .tag { color: var(--good); }
+  #f-view .no .tag { color: var(--bad); }
+  #f-view ol.steps { margin: 0; padding-left: 22px; }
+  #f-view ol.steps li { margin: 4px 0; }
+  #f-view .tokrow { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 4px; align-items: flex-end; }
+  #f-view .tok { font-family: var(--font-code); font-size: 12.5px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); text-align: center; }
+  #f-view .tok.p { background: var(--bg); color: var(--muted); }
+  #f-view .tok.c { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  #f-view .tok.c small { display: block; font-size: 11px; color: var(--accent); margin-top: 2px; }
+  #f-view .legend-row { display: flex; gap: 18px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  #f-view .io-sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; border: 1px solid var(--line); }
+  #f-view table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  #f-view th, #f-view td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  #f-view th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  #f-view .formula { font-family: var(--font-code); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0; display: inline-block; }
+</style>
+</head>
+<body>
+<nav class="tabs" role="tablist" aria-label="切换页面">
+  <button class="tab" role="tab" id="tab-popo" aria-selected="true">POPO-OPD-Relay 运行流程</button>
+  <button class="tab" role="tab" id="tab-grpo" aria-selected="false">GRPOTrainer 运行机制</button>
+  <button class="tab" role="tab" id="tab-trl" aria-selected="false">POPO / OPD 接入 TRL</button>
+  <button class="tab" role="tab" id="tab-replay" aria-selected="false">POPO 死组重放</button>
+  <button class="tab" role="tab" id="tab-opd" aria-selected="false">OPD 运行机制</button>
+  <button class="tab" role="tab" id="tab-io" aria-selected="false">交给模型与模型输出</button>
+  <button class="tab" role="tab" id="tab-opt" aria-selected="false">优化器</button>
+</nav>
+<div class="wrap">
+<div class="view" id="g-view" hidden style="max-width:none;padding-inline:0">
+  <iframe src="optimizer.html" title="优化器逐步讲解" style="display:block;width:100%;height:calc(100vh - 150px);min-height:560px;border:0"></iframe>
+</div>
+<div class="view" id="b-view">
+  <h1>POPO-OPD-Relay 从备题到出图的全过程</h1>
+  <p class="gist">本质上是，先把题库切成训练题和测试题两个文件（里面 3 个数字和 4 个数字的题混在一起，读的时候只留 3 个数字的），用训练题把 1.5B 模型训成教师，再让教师逐个 token 带 0.5B 学生；每个训练出的模型都拿同一份 1,477 道测试题去答，答对数最后汇总成表和图。</p>
+  <div class="legend" id="b-legend" aria-label="图例"></div>
+
+  <div class="stage">
+    <svg class="diagram" id="b-diagram" viewBox="0 0 1000 690" role="group" aria-label="左列是外部来源，中列是用户运行的进程，右列是写出的文件和文件夹">
+      <defs>
+        <marker id="b-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path>
+        </marker>
+      </defs>
+      <text class="colhead" x="20" y="16">读进来的东西</text>
+      <text class="colhead" x="310" y="16">用户运行的进程（从上往下是运行先后）</text>
+      <text class="colhead" x="680" y="16">写出来的文件和文件夹</text>
+      <g id="b-nodes"></g>
+      <g id="b-arrows"></g>
+      <g id="b-pkTest" class="packet"><rect></rect><text text-anchor="middle" y="4"></text></g>
+      <g id="b-pkTrain" class="packet"><rect></rect><text text-anchor="middle" y="4"></text></g>
+    </svg>
+  </div>
+
+  <section class="note" id="b-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="b-noteTitle"></h2>
+      <button class="note-close" id="b-noteClose" aria-label="隐藏说明">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg>
+      </button>
+    </div>
+    <dl id="b-noteRows"></dl>
+  </section>
+
+  <div class="caption" aria-live="polite">
+    <p class="say" id="b-say"></p>
+    <p class="code" id="b-code"></p>
+  </div>
+
+  <div class="nav">
+    <button class="arrow-btn prev" id="b-prev" aria-label="上一步">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg>
+    </button>
+    <div class="dots" id="b-dots"></div>
+    <span class="count" id="b-count"></span>
+    <button class="arrow-btn next" id="b-next" aria-label="下一步">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg>
+    </button>
+  </div>
+</div>
+<div class="view" id="a-view" hidden>
+  <h1>GRPOTrainer 一步训练里发生了什么：GRPO 正式运行的第 2 步</h1>
+  <p class="gist">本质上是，每一步拿 4 道题，让模型给每道题写 8 个回答并打分，同一道题里比平均分高的回答被往"更可能写出来"推、比平均分低的被往回拉，攒满 16 次再改一次模型。</p>
+  <div class="legend" id="a-legend" aria-label="图例"></div>
+
+  <div class="stage">
+    <svg class="diagram" id="a-diagram" viewBox="0 0 1000 560" role="group" aria-label="左边是训练进程里的部件，中间是本步 32 行数据 out，右边是切好的 16 份">
+      <defs>
+        <marker id="a-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path>
+        </marker>
+      </defs>
+      <g id="a-draw"></g>
+    </svg>
+  </div>
+
+  <section class="note" id="a-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="a-noteTitle"></h2>
+      <button class="note-close" id="a-noteClose" aria-label="隐藏说明">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg>
+      </button>
+    </div>
+    <dl id="a-noteRows"></dl>
+  </section>
+
+  <div class="caption" aria-live="polite">
+    <p class="say" id="a-say"></p>
+    <p class="code" id="a-code"></p>
+  </div>
+
+  <div class="nav">
+    <button class="arrow-btn prev" id="a-prev" aria-label="上一步">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg>
+    </button>
+    <div class="dots" id="a-dots"></div>
+    <span class="count" id="a-count"></span>
+    <button class="arrow-btn next" id="a-next" aria-label="下一步">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg>
+    </button>
+  </div>
+</div>
+<div class="view" id="c-view" hidden>
+  <h1>POPOTrainer 和 OPDTrainer 是怎么接到 TRL 的 GRPOTrainer 上的</h1>
+  <p class="gist">本质上是，TRL 每一步都按名字去叫 _generate_and_score_completions（让模型写回答、打分），POPOTrainer 把 POPO 写的同名方法排在 TRL 前面，所以先被叫到的是 POPO 的；POPO 再把活交回给 TRL 做完，拿回结果换掉死组。</p>
+  <div class="legend" id="c-legend" aria-label="图例"></div>
+
+  <div class="stage">
+    <svg class="diagram" id="c-diagram" viewBox="0 0 900 500" role="group" aria-label="左边是从上往下排的类，右边是 trainer 对象">
+      <defs>
+        <marker id="c-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path>
+        </marker>
+        <marker id="c-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path>
+        </marker>
+        <marker id="c-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path>
+        </marker>
+      </defs>
+      <g id="c-draw"></g>
+    </svg>
+  </div>
+
+  <section class="note" id="c-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="c-noteTitle"></h2>
+      <button class="note-close" id="c-noteClose" aria-label="隐藏说明">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg>
+      </button>
+    </div>
+    <dl id="c-noteRows"></dl>
+  </section>
+
+  <div class="caption" aria-live="polite">
+    <p class="say" id="c-say"></p>
+    <p class="code" id="c-code"></p>
+  </div>
+
+  <div class="nav">
+    <button class="arrow-btn prev" id="c-prev" aria-label="上一步">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg>
+    </button>
+    <div class="dots" id="c-dots"></div>
+    <span class="count" id="c-count"></span>
+    <button class="arrow-btn next" id="c-next" aria-label="下一步">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg>
+    </button>
+  </div>
+</div>
+<div class="view" id="d-view" hidden>
+  <h1>POPO 的死组重放：正式运行里第 1–3 步走的全过程</h1>
+  <p class="gist">本质上是，一道题的 8 个回答得分全一样（死组）就学不到东西，于是把它换成缓冲区里最近一道有对有错的旧题和当时的 8 个回答，再按现在的模型给这些旧回答重新打分，算出权重 ρ 乘上去。</p>
+  <div class="legend" id="d-legend" aria-label="图例"></div>
+
+  <div class="stage">
+    <svg class="diagram" id="d-diagram" viewBox="0 0 1000 520" role="group" aria-label="左边是函数里的变量和模型，中间是本步 32 行数据 out，右边是回放缓冲区的 4 个位置">
+      <defs>
+        <marker id="d-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path>
+        </marker>
+      </defs>
+
+      <!-- 训练进程：最外面的虚线框 -->
+      <g id="d-trainer" class="node clickable on">
+        <rect class="box procframe" x="6" y="6" width="988" height="508" rx="14"></rect>
+        <text class="colhead" x="22" y="30">训练进程 python train.py --popo：TRL 每一步调用 POPOTrainer._generate_and_score_completions（来自 src/POPO.py）</text>
+      </g>
+      <g class="chip found" id="d-badge"><rect x="850" y="13" width="76" height="22" rx="5"></rect><text class="chiptext" id="d-badgeText" x="888" y="28" text-anchor="middle">第 1 步</text></g>
+
+      <!-- 中间 out -->
+      <g id="d-zout" class="node clickable on">
+        <rect class="box zonebox" x="300" y="50" width="440" height="420" rx="12"></rect>
+        <text class="title" x="314" y="74">out：本步 4 道题 × 8 个回答 = 32 行</text>
+        <text class="sub" x="314" y="94">每一格是一行的优势</text>
+      </g>
+
+      <!-- 右边 replay_buffer -->
+      <g id="d-zbuf" class="node clickable on">
+        <rect class="box zonebox" x="770" y="50" width="210" height="420" rx="12"></rect>
+        <text class="title" x="784" y="74">replay_buffer</text>
+        <text class="sub" x="784" y="94">最多 4 组</text>
+      </g>
+
+      <g id="d-cells"></g>
+
+      <!-- 左边一列：函数里的变量和模型 -->
+      <g id="d-v_dead" class="node clickable">
+        <rect class="box" x="20" y="50" width="250" height="76" rx="10"></rect>
+        <text class="title" x="34" y="76">dead_groups</text>
+        <text class="val" id="d-t_dead" x="34" y="98"></text>
+        <text class="sub" id="d-t_dead2" x="34" y="116"></text>
+      </g>
+      <g id="d-v_excl" class="node clickable">
+        <rect class="box" x="20" y="136" width="250" height="76" rx="10"></rect>
+        <text class="title" x="34" y="162">exclude_prompts</text>
+        <text class="val" id="d-t_excl" x="34" y="184"></text>
+        <text class="sub" id="d-t_excl2" x="34" y="202"></text>
+      </g>
+      <g id="d-v_live" class="node clickable">
+        <rect class="box" x="20" y="222" width="250" height="76" rx="10"></rect>
+        <text class="title" x="34" y="248">live_records</text>
+        <text class="val" id="d-t_live" x="34" y="270"></text>
+        <text class="sub" id="d-t_live2" x="34" y="288"></text>
+      </g>
+      <g id="d-v_picks" class="node clickable">
+        <rect class="box" x="20" y="308" width="250" height="76" rx="10"></rect>
+        <text class="title" x="34" y="334">picks</text>
+        <text class="val" id="d-t_picks" x="34" y="356"></text>
+        <text class="sub" id="d-t_picks2" x="34" y="374"></text>
+      </g>
+      <g id="d-v_model" class="node clickable">
+        <rect class="box" x="20" y="394" width="250" height="76" rx="10"></rect>
+        <text class="title" x="34" y="420">self.model</text>
+        <text class="sub" x="34" y="442">正在训练的模型</text>
+        <text class="sub" x="34" y="460">Qwen2.5-1.5B</text>
+      </g>
+
+      <!-- 箭头 -->
+      <path id="d-a_g1_live" class="arrow" d="M302 226 H285 V260 H274" marker-end="url(#d-head)"></path>
+      <path id="d-a_live_buf" class="arrow" d="M272 268 H288 V484 H755 V146 H780" marker-end="url(#d-head)"></path>
+      <path id="d-a_buf_g0" class="arrow" d="M782 140 H746" marker-end="url(#d-head)"></path>
+      <path id="d-a_buf_picks" class="arrow" d="M782 162 H758 V484 H288 V346 H274" marker-end="url(#d-head)"></path>
+      <path id="d-a_model_g0" class="arrow" d="M272 432 H290 V138 H306" marker-end="url(#d-head)"></path>
+    </svg>
+  </div>
+
+  <section class="note" id="d-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="d-noteTitle"></h2>
+      <button class="note-close" id="d-noteClose" aria-label="隐藏说明">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg>
+      </button>
+    </div>
+    <dl id="d-noteRows"></dl>
+  </section>
+
+  <div class="caption" aria-live="polite">
+    <p class="say" id="d-say"></p>
+    <p class="code" id="d-code"></p>
+  </div>
+
+  <div class="nav">
+    <button class="arrow-btn prev" id="d-prev" aria-label="上一步">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg>
+    </button>
+    <div class="dots" id="d-dots"></div>
+    <span class="count" id="d-count"></span>
+    <button class="arrow-btn next" id="d-next" aria-label="下一步">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg>
+    </button>
+  </div>
+</div>
+<div class="view" id="f-view" hidden>
+
+  <h1>POPO-OPD-Relay：交给模型的是什么，模型输出的是什么</h1>
+  <p class="gist">本质上是，模型每次拿到的都是同一段题目文字，只换里面的三个数字和目标数，模型接着这段文字往下写出解题过程和 &lt;answer&gt; 里的算式；到了 POPO 重新打分和 OPD 教师打分的时候，模型不再写字，而是给一份已经写好的回答里的每个 token 各打一个分（logp）。</p>
+  <p class="io-sub">依据：仓库 Solomenn/POPO-OPD-Relay 最新提交 06ed502 的源码，以及 results/raw/ 里的评测文件。</p>
+
+  <!-- ============ 1 ============ -->
+  <section class="panel">
+    <h2>一、项目里有五个地方把东西交给模型（按运行先后）</h2>
+    <p class="io-sub" style="margin-bottom:12px">第 1–4 处发生在训练的每一步里（每一步 4 道题 × 每题 8 份回答 = 32 行）；第 5 处是训练结束后由用户另行运行的评测。</p>
+    <div class="calls">
+
+      <div class="call">
+        <div class="call-head"><span class="num">1</span><b>训练时模型写回答（GRPO、POPO、OPD 三种训练都有）</b><span class="where">TRL 的 GRPOTrainer 用 vLLM 调用正在训练的模型</span></div>
+        <div class="flow">
+          <div class="io-cell in"><span class="lab">交给模型</span>一道题的题目文字 prompt（由 src/countdown.py 的 format_prompt 把 nums 和 target 填进模板 PROMPT 得到），同一道题交 8 次。</div>
+          <div class="arr">→</div>
+          <div class="io-cell out"><span class="lab">模型输出</span>8 份不同的回答文字 completion：模型从题目最后的 &lt;think&gt; 后面接着写，写到 &lt;/answer&gt; 或 "\nUser:" 停下，最多写 1024 个 token。温度 1.0，所以 8 份各不相同。</div>
+          <div class="arr">→</div>
+          <div class="io-cell use"><span class="lab">输出交给谁</span>reward_countdown 用 is_correct 给每份回答判分：答对 1.0，答错 0.0。TRL 再用同一道题 8 个分数算出每份回答的优势。</div>
+        </div>
+      </div>
+
+      <div class="call">
+        <div class="call-head"><span class="num">2</span><b>训练时模型给回答打 logp（三种训练都有）</b><span class="where">TRL 的 GRPOTrainer 调用正在训练的模型</span></div>
+        <div class="flow">
+          <div class="io-cell in"><span class="lab">交给模型</span>题目的 token（prompt_ids）和回答的 token（completion_ids）接成的一整行。</div>
+          <div class="arr">→</div>
+          <div class="io-cell out"><span class="lab">模型输出</span>回答里每个 token 的 logp：模型在这个位置写出这个 token 的概率取对数，一个 token 一个数。</div>
+          <div class="arr">→</div>
+          <div class="io-cell use"><span class="lab">输出交给谁</span>TRL 把这些 logp 存成 old_per_token_logps；算损失时 TRL 让模型给同样的回答再算一次 logp，两次相除得到比率，比率乘优势得到损失，再更新模型。</div>
+        </div>
+      </div>
+
+      <div class="call">
+        <div class="call-head"><span class="num">3</span><b>POPO：现在的模型给缓冲区里的旧回答重新打分</b><span class="where">src/POPO.py 的 _logps_no_grad，只在 python train.py --popo 时发生</span></div>
+        <div class="flow">
+          <div class="io-cell in"><span class="lab">交给模型</span>缓冲区里一道旧题的题目 token 和当时的 8 份旧回答 token（只在这一步出现 8 份回答得分全一样的题时才发生）。</div>
+          <div class="arr">→</div>
+          <div class="io-cell out"><span class="lab">模型输出</span>旧回答里每个 token 的 logp（现在的模型给的分）。模型不写新字。</div>
+          <div class="arr">→</div>
+          <div class="io-cell use"><span class="lab">输出交给谁</span>decoupled_is_weights 用它和旧回答采样时的 logp 算出每个 token 的权重 ρ。</div>
+        </div>
+      </div>
+
+      <div class="call">
+        <div class="call-head"><span class="num">4</span><b>OPD：教师模型给学生写的回答打分</b><span class="where">src/OPD.py 的 teacher_logps_no_grad，只在 python train.py --opd 时发生</span></div>
+        <div class="flow">
+          <div class="io-cell in"><span class="lab">交给教师模型</span>学生在第 1 处写出的 32 份回答，每份连同它的题目 token 接成一行，每次交 8 行（opd_teacher_batch_size = 8）。</div>
+          <div class="arr">→</div>
+          <div class="io-cell out"><span class="lab">教师模型输出</span>学生回答里每个 token 的 logp（教师给的分）。教师不写新字。</div>
+          <div class="arr">→</div>
+          <div class="io-cell use"><span class="lab">输出交给谁</span>opd_token_weights 和 apply_opd_token_advantages 用 教师 logp − 学生 logp 算出每个 token 的优势，替换 TRL 原来的优势。</div>
+        </div>
+      </div>
+
+      <div class="call">
+        <div class="call-head"><span class="num">5</span><b>评测时模型写回答</b><span class="where">evaluate_countdown.py 的 main，用 vLLM 调用被评测的模型</span></div>
+        <div class="flow">
+          <div class="io-cell in"><span class="lab">交给模型</span>1,477 道测试题的题目文字（同一个 format_prompt 模板），每道题交 1 次。</div>
+          <div class="arr">→</div>
+          <div class="io-cell out"><span class="lab">模型输出</span>每道题 1 份回答文字。温度 0（每一步都选概率最大的 token），最多 512 个 token，停止条件和训练时一样。</div>
+          <div class="arr">→</div>
+          <div class="io-cell use"><span class="lab">输出交给谁</span>is_correct 判对错；evaluate_countdown.py 把每题的 idx、ok、equation、nums、target、completion 写成 JSONL 的一行。</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ 2 ============ -->
+  <section class="panel">
+    <h2>二、交给模型的题目文字：一个真实例子</h2>
+    <p class="io-sub">测试题文件 data/countdown_test.jsonl 里这道题存的是 {"nums": [84, 36, 48], "target": 96}，在评测文件里是 idx 4。format_prompt 把它填进模板后，模型读到的就是下面这一整段（黄色是填进去的值）：</p>
+    <pre class="prompt" style="margin-top:10px">A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer.
+User: Using the numbers <mark>[84, 36, 48]</mark>, create an equation that equals <mark>96</mark>. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in &lt;think&gt; &lt;/think&gt; tags. And return the final answer in &lt;answer&gt; &lt;/answer&gt; tags, for example &lt;answer&gt; (1 + 2) / 3 &lt;/answer&gt;.
+Assistant: Let me solve this step by step.
+<span class="tail">&lt;think&gt;</span></pre>
+    <p class="io-sub" style="margin-top:8px">中文意思：用数字 [84, 36, 48] 写一个等于 96 的算式，只能用 + − × ÷，每个数字只能用一次；推导写在 &lt;think&gt; &lt;/think&gt; 里，最终算式写在 &lt;answer&gt; &lt;/answer&gt; 里。题目文字停在 <span class="tail">&lt;think&gt;</span>，所以模型的回答从推导开始写。</p>
+
+    <h2 style="margin-top:22px">模型输出的回答：同一道题，三个模型的原文</h2>
+    <p class="io-sub">下面是评测文件里 completion 字段的原文（第 5 处的输出）。模型写到 &lt;/answer&gt; 时停下，vLLM 不把 &lt;/answer&gt; 本身放进回答，所以回答以算式结尾。</p>
+    <div class="answers">
+      <div class="ans no">
+        <div class="ans-head"><b>教师基座 Qwen2.5-1.5B，训练前</b><span>countdown_paired_seed42_20261021/base_eval/step0000.jsonl</span></div>
+<pre> 84 - 36 = 48 &lt;/think&gt;
+&lt;think&gt; 48 + 48 = 96 &lt;/think&gt;
+So, the equation that equals 96 using the numbers [84, 36, 48] is (84 - 36) + 48 = 96.</pre>
+        <div class="verdict"><span class="tag">判错</span>回答里没有 &lt;answer&gt;，extract_equation 取不出算式（equation 为 null）。</div>
+      </div>
+      <div class="ans ok">
+        <div class="ans-head"><b>POPO 教师 Qwen2.5-1.5B，第 400 步</b><span>countdown_paired_seed42_20261021/popo_s42_eval/step0400.jsonl</span></div>
+<pre> 84 + 36 &lt;/think&gt; = 120
+&lt;think&gt; 120 - 48 &lt;/think&gt; = 72
+Oops, that's too small. Let's try again.
+&lt;think&gt; 84 + 48 &lt;/think&gt; = 132
+&lt;think&gt; 132 - 36 &lt;/think&gt; = 96
+There we go! That's exactly what we needed.
+&lt;answer&gt; (84 + 48) - 36 </pre>
+        <div class="verdict"><span class="tag">判对</span>算式 (84 + 48) - 36 用了 84、48、36 各一次，值等于 96。</div>
+      </div>
+      <div class="ans no">
+        <div class="ans-head"><b>OPD 学生 Qwen2.5-0.5B（POPO 教师），第 400 步</b><span>opd_full_distill_popo_20261022/opd_s42_eval/step0400.jsonl</span></div>
+<pre> 84 + 36 &lt;/think&gt; = 120
+&lt;think&gt; 120 - 48 &lt;/think&gt; = 72
+&lt;think&gt; 72 + 84 &lt;/think&gt; = 156
+&lt;think&gt; 156 - 36 &lt;/think&gt; = 120
+&lt;think&gt; 120 - 48 &lt;/think&gt; = 72
+&lt;think&gt; 72 + 84 &lt;/think&gt; = 156
+……（同样的几行反复出现，共 1,660 个字符）
+&lt;think&gt; 120 - 48 &lt;/think&gt; = 72
+&lt;think&gt;</pre>
+        <div class="verdict"><span class="tag">判错</span>学生写满 512 个 token 被截断，回答里没有 &lt;answer&gt;。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 3 ============ -->
+  <section class="panel">
+    <h2>三、回答文字怎么变成分数（src/countdown.py 的 is_correct）</h2>
+    <ol class="steps">
+      <li>extract_equation 在回答里找 &lt;answer&gt;，取它后面到 &lt;/answer&gt; 为止的文字；没有 &lt;/answer&gt; 就取到回答结尾；没有 &lt;answer&gt; 返回 None。例：" … &lt;answer&gt; (84 + 48) - 36 " → "(84 + 48) - 36"。</li>
+      <li>evaluate_equation 检查算式只含数字、+ − * /、括号和空白，再算出它的值，同时记下用到的整数。例："(84 + 48) - 36" → 值 96，用到 [84, 48, 36]。</li>
+      <li>is_correct 比较两件事：用到的整数和题目的 nums 完全一样（每个恰好一次），而且值恰好等于 target。两件都成立返回 True，否则返回 False。</li>
+      <li>训练时 reward_countdown 把 True 记成 1.0、False 记成 0.0；评测时 evaluate_countdown.py 把 True/False 写进 ok 字段，并累加答对数。</li>
+    </ol>
+  </section>
+
+  <!-- ============ 4 ============ -->
+  <section class="panel">
+    <h2>四、模型给回答打分时，交进去和拿出来的样子（第 2、3、4 处）</h2>
+    <p class="io-sub">代码把题目 token 和回答 token 接成一行交给模型；模型对每个位置给出下一个 token 的概率，代码只取回答那一段、只取回答里实际写出的那个 token 的 logp。下面用第二部分 POPO 教师回答的开头示意（token 的切法只为示意，实际以分词器为准）：</p>
+    <div class="tokrow">
+      <span class="tok p">…step</span><span class="tok p">by</span><span class="tok p">step</span><span class="tok p">.\n</span><span class="tok p">&lt;think&gt;</span>
+      <span class="tok c">84<small>logp</small></span><span class="tok c">+<small>logp</small></span><span class="tok c">36<small>logp</small></span><span class="tok c">&lt;/think&gt;<small>logp</small></span><span class="tok c">=<small>logp</small></span><span class="tok c">120<small>logp</small></span><span class="tok c">…<small>…</small></span>
+    </div>
+    <div class="legend-row"><span><i class="io-sw" style="background:var(--bg)"></i>题目 token：交给模型，不取分</span><span><i class="io-sw" style="background:color-mix(in srgb, var(--accent) 12%, transparent)"></i>回答 token：交给模型，每个取一个 logp</span></div>
+
+    <table style="margin-top:16px">
+      <thead><tr><th>位置</th><th>哪个模型打分</th><th>打分对象</th><th>拿到 logp 之后算什么</th></tr></thead>
+      <tbody>
+        <tr><td>第 2 处</td><td>正在训练的模型</td><td>本步刚写出的 32 份回答</td><td>TRL 用 logp 和优势算损失。</td></tr>
+        <tr><td>第 3 处 POPO</td><td>现在的模型（正在训练的 Qwen2.5-1.5B）</td><td>缓冲区里旧题的 8 份旧回答</td><td><span class="formula">ρ = exp(现在的 logp − 采样时的 logp)</span><br>正式运行 rho_clip = 2.0，超过 2.0 的 ρ 压到 2.0；代码把 ρ 写进 importance_sampling_ratio，TRL 把它乘在这些旧回答的损失外面。</td></tr>
+        <tr><td>第 4 处 OPD</td><td>教师：配对 POPO 教师第 400 步（manifest 里 opd_teacher_model 指向 popo_s42），或独立重训的 GRPO 教师第 400 步</td><td>学生本步写出的 32 份回答</td><td><span class="formula">优势 = 教师 logp − 学生 logp</span><br>正式运行 opd_weight_clip = 3，差值裁到 −3 到 3 之间。教师比学生更愿意写的 token 优势为正，学生被推向更常写它。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- ============ 5 ============ -->
+  <section class="panel">
+    <h2>五、训练和评测时交给模型的设置对照</h2>
+    <table>
+      <thead><tr><th>设置</th><th>训练（第 1 处，train.py）</th><th>评测（第 5 处，evaluate_countdown.py）</th></tr></thead>
+      <tbody>
+        <tr><td>每次交几道题</td><td>每一步 4 道题（prompts_per_rollout = 4）</td><td>1,477 道题一次全部交给 vLLM</td></tr>
+        <tr><td>每道题写几份回答</td><td>8 份（num_generations = 8），一步共 32 份</td><td>1 份</td></tr>
+        <tr><td>温度</td><td>1.0（top_p = 1.0）</td><td>0（每一步选概率最大的 token）</td></tr>
+        <tr><td>每份回答最多几个 token</td><td>1024（completion_length）</td><td>512（max_tokens）</td></tr>
+        <tr><td>题目 + 回答的 token 总数上限</td><td>2048（vllm_max_model_length）</td><td>2048（max_model_len）</td></tr>
+        <tr><td>停止条件</td><td colspan="2">写出 &lt;/answer&gt; 或 "\nUser:"（src/countdown.py 的 STOPS）</td></tr>
+        <tr><td>用哪些题</td><td>data/countdown_train.jsonl 里数字个数为 3 的 9,937 道</td><td>data/countdown_test.jsonl 里数字个数为 3 的 1,477 道</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+</div>
+<div class="view" id="e-view" hidden>
+  <h1>OPDTrainer 一步训练里发生了什么：学生正式运行的第 1 步</h1>
+  <p class="gist">本质上是，学生自己写 32 个回答，教师给回答里的每个 token 再打一次分，用教师的分减学生的分当这个 token 的优势：教师比学生更愿意写的 token 被往“更可能写出来”推，教师比学生更不愿意写的被往回拉。</p>
+  <div class="legend" id="e-legend" aria-label="图例"></div>
+
+  <div class="stage">
+    <svg class="diagram" id="e-diagram" viewBox="0 0 1000 560" role="group" aria-label="左边是训练进程里的部件，中间是本步 32 行数据 out 和其中一行回答的 8 个 token，右边是切好的 16 份">
+      <defs>
+        <marker id="e-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path>
+        </marker>
+      </defs>
+      <g id="e-draw"></g>
+    </svg>
+  </div>
+
+  <section class="note" id="e-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="e-noteTitle"></h2>
+      <button class="note-close" id="e-noteClose" aria-label="隐藏说明">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg>
+      </button>
+    </div>
+    <dl id="e-noteRows"></dl>
+  </section>
+
+  <div class="caption" aria-live="polite">
+    <p class="say" id="e-say"></p>
+    <p class="code" id="e-code"></p>
+  </div>
+
+  <div class="nav">
+    <button class="arrow-btn prev" id="e-prev" aria-label="上一步">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg>
+    </button>
+    <div class="dots" id="e-dots"></div>
+    <span class="count" id="e-count"></span>
+    <button class="arrow-btn next" id="e-next" aria-label="下一步">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg>
+    </button>
+  </div>
+</div>
+</div>
+<script>
+(function () {
+  var P = "b-";
+
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var $ = function (id) { return document.getElementById(P + id); };
+  function mk(tag, attrs, parent) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+
+  /* ---- 图里的框：id, 类型, x, y, 宽, 高, 标题, 小字 ---- */
+  var L = 20, LW = 250, M = 310, MW = 320, R = 680, RW = 300;
+  var Y = [28, 140, 252, 364, 476, 588], H = 84, HH = 38;
+  var BOXES = [
+    ["hf",     "folder",  L, Y[0], LW, H,  "Countdown-Tasks-3to4", "Hugging Face 上的题库"],
+    ["prep",   "process", M, Y[0], MW, H,  "prepare_countdown.py", "下载、洗牌、切分"],
+    ["ftrain", "file",    R, Y[0], RW, HH, "countdown_train.jsonl", ""],
+    ["ftest",  "file",    R, Y[0] + 46, RW, HH, "countdown_test.jsonl", ""],
+
+    ["base15", "folder",  L, Y[1], LW, H,  "Qwen2.5-1.5B", "教师的起点模型"],
+    ["trT",    "process", M, Y[1], MW, H,  "train.py --popo", "教师 · POPOTrainer"],
+    ["outT",   "folder",  R, Y[1], RW, HH, "popo_s42/", ""],
+    ["logT",   "file",    R, Y[1] + 46, RW, HH, "popo_s42.log", ""],
+
+    ["evT",    "process", M, Y[2], MW, H,  "evaluate_countdown.py", "评教师的快照"],
+    ["resT",   "file",    R, Y[2], RW, HH, "popo_s42_eval/step0400.jsonl", ""],
+    ["cmpT",   "file",    R, Y[2] + 46, RW, HH, "step0400.jsonl.complete.json", ""],
+
+    ["base05", "folder",  L, Y[3], LW, H,  "Qwen2.5-0.5B", "学生的起点模型"],
+    ["trS",    "process", M, Y[3], MW, H,  "train.py --opd", "学生 · OPDTrainer"],
+    ["outS",   "folder",  R, Y[3], RW, HH, "opd_s42/", ""],
+    ["logS",   "file",    R, Y[3] + 46, RW, HH, "opd_s42.log", ""],
+
+    ["evS",    "process", M, Y[4], MW, H,  "evaluate_countdown.py", "评学生的检查点"],
+    ["resS",   "file",    R, Y[4], RW, HH, "opd_s42_eval/step0400.jsonl", ""],
+    ["cmpS",   "file",    R, Y[4] + 46, RW, HH, "step0400.jsonl.complete.json", ""],
+
+    ["plot",   "process", M, Y[5], MW, H,  "plot_paper_figures.py", "两张表、六张图"],
+    ["figs",   "folder",  R, Y[5], RW, H,  "reports/figures/", "CSV · SVG · PNG"]
+  ];
+  function mid(id, side) {
+    var b = BOXES.filter(function (x) { return x[0] === id; })[0];
+    var cy = b[3] + b[5] / 2;
+    return side === "l" ? [b[2], cy] : side === "r" ? [b[2] + b[4], cy] : [b[2] + b[4] / 2, cy];
+  }
+
+  /* ---- 箭头 ---- */
+  function h(a, b) { return "M" + (a[0] + 2) + " " + a[1] + " H" + (b[0] - 4); }   // 左框右边 → 右框左边，同一高度
+  function back(from, gx, to) {                                                     // 右列 → 中列：先往左到 gx，再上下，再往左进中列
+    return "M" + (from[0] - 2) + " " + from[1] + " H" + gx + " V" + to[1] + " H" + (to[0] + 4);
+  }
+  var ARROWS = {
+    a_hf_prep:    h(mid("hf", "r"), mid("prep", "l")),
+    a_prep_train: "M632 " + mid("prep", "r")[1] + " H656 V" + mid("ftrain", "l")[1] + " H676",
+    a_prep_test:  "M632 " + mid("prep", "r")[1] + " H656 V" + mid("ftest", "l")[1] + " H676",
+    a_train_trT:  back(mid("ftrain", "l"), 650, [M + MW, Y[1] + 30]),
+    a_base_trT:   h(mid("base15", "r"), mid("trT", "l")),
+    a_trT_out:    "M632 " + (Y[1] + 30) + " H656 V" + mid("outT", "l")[1] + " H676",
+    a_trT_log:    "M632 " + (Y[1] + 54) + " H662 V" + mid("logT", "l")[1] + " H676",
+    a_test_evT:   back(mid("ftest", "l"), 664, [M + MW, Y[2] + 30]),
+    a_out_evT:    back(mid("outT", "l"), 648, [M + MW, Y[2] + 56]),
+    a_evT_res:    "M632 " + (Y[2] + 30) + " H656 V" + mid("resT", "l")[1] + " H676",
+    a_evT_cmp:    "M632 " + (Y[2] + 54) + " H662 V" + mid("cmpT", "l")[1] + " H676",
+    a_train_trS:  back(mid("ftrain", "l"), 650, [M + MW, Y[3] + 30]),
+    a_base_trS:   h(mid("base05", "r"), mid("trS", "l")),
+    a_outT_trS:   back(mid("outT", "l"), 664, [M + MW, Y[3] + 56]),
+    a_trS_out:    "M632 " + (Y[3] + 30) + " H656 V" + mid("outS", "l")[1] + " H676",
+    a_trS_log:    "M632 " + (Y[3] + 54) + " H662 V" + mid("logS", "l")[1] + " H676",
+    a_test_evS:   back(mid("ftest", "l"), 664, [M + MW, Y[4] + 30]),
+    a_outS_evS:   back(mid("outS", "l"), 648, [M + MW, Y[4] + 56]),
+    a_evS_res:    "M632 " + (Y[4] + 30) + " H656 V" + mid("resS", "l")[1] + " H676",
+    a_evS_cmp:    "M632 " + (Y[4] + 54) + " H662 V" + mid("cmpS", "l")[1] + " H676",
+    a_in_plot:    ["logT", "cmpT", "logS", "cmpS"].map(function (id) { var p = mid(id, "l"); return "M" + (p[0] - 2) + " " + p[1] + " H656"; }).join(" ") +
+                  " M656 " + mid("logT", "l")[1] + " V" + (Y[5] + 26) + " H634",
+    a_plot_figs:  "M632 " + (Y[5] + 58) + " H676"
+  };
+
+  /* ---- 例子在图里停的位置 ---- */
+  var PX = M + MW - 14;   // 标签右边缘
+  var AT = { prep1: [PX, Y[0] + 46], prep2: [PX, Y[0] + 70], trT: [PX, Y[1] + 62], trTa: [PX, Y[1] + 46], trTb: [PX, Y[1] + 70],
+             evT: [PX, Y[2] + 62], evTa: [PX, Y[2] + 46], evTb: [PX, Y[2] + 70], evS: [PX, Y[4] + 62] };
+
+  /* ---- 每一步 ---- */
+  var TEST = "[42, 32, 5] → 50", TRAIN = "[49, 77, 93] → 33";
+  var TRAIN4 = "[9, 50, 22, 49] → 99", TEST4 = "[66, 33, 28, 11] → 55";   // 4 个数字的题：训练文件第 2 行、测试文件第 3 行
+  var STEPS = [
+    { on: ["hf", "prep"], hot: ["prep"], arrows: ["a_hf_prep"],
+      say: "用户运行 prepare_countdown.py：从 Hugging Face 下载 Countdown-Tasks-3to4 题库，按种子 0 洗牌。每道题是几个数字 nums 和一个目标数 target。",
+      code: "ds = load_dataset(\"Jiayi-Pan/Countdown-Tasks-3to4\", split=\"train\").shuffle(seed=a.seed)" },
+    { on: ["hf", "prep", "ftrain", "ftest"], hot: ["ftrain", "ftest"], arrows: ["a_prep_train", "a_prep_test"],
+      pkTrain: ["prep1", TRAIN], pkTest: ["prep2", TEST],
+      say: "洗好的前 3,000 题写进 countdown_test.jsonl，紧接着的 20,000 题写进 countdown_train.jsonl，每行一题。这里不管数字个数，3 个数字和 4 个数字的题都原样写进去。例如训练文件第 1 行是 [49, 77, 93] → 33，测试文件第 7 行是 [42, 32, 5] → 50。",
+      code: "test = ds.select(range(a.test_size))\ntrain = ds.select(range(a.test_size, a.test_size + a.train_size))\nwrite_jsonl(path, split)   # 每行 {\"nums\": [...], \"target\": ...}" },
+    { on: ["ftrain", "ftest", "trT"], hot: ["trT"], arrows: [],
+      say: "用户启动教师训练 train.py --popo。它先检查参数能不能这样搭配，再算批次：每步 4 道题各写 8 个回答，共 32 行；每次前向算 2 行，攒 16 次才更新一次模型。然后检查输出目录是空的、TRL 是 1.13.0、有显卡、磁盘够用。",
+      code: "generation_batch_size, grad_accum = batch_geometry(a.prompts_per_rollout, 8, a.micro_batch)   # (4, 8, 2) → (32, 16)" },
+    { on: ["ftrain", "ftest", "trT"], hot: ["trT", "ftrain"], arrows: ["a_train_trT"],
+      pkTrain: ["trTa", TRAIN], pkTest: ["trTb", TRAIN4], pkTestKind: "drop",
+      say: "按环境变量 COUNTDOWN_TRAIN_FILE 找到训练文件，读进来先筛：只留 3 个数字的题。20,000 题里 3 个数字的 9,937 题留下，4 个数字的 10,063 题丢掉；例如第 2 行 [9, 50, 22, 49] → 99 被丢掉。",
+      code: "ds = ds.filter(lambda row: len(row[\"nums\"]) == 3)   # 20,000 → 9,937\nds = ds.select(range(min(a.train_size, len(ds))))    # train_size 是 20,000，比 9,937 大，9,937 题全用" },
+    { on: ["ftrain", "ftest", "trT"], hot: ["trT"], arrows: [], pkTrain: ["trT", TRAIN],
+      say: "再用 format_prompt 把留下的每道题写成发给模型的英文题目，同时留着 nums 和 target，判分时要用。",
+      code: "countdown.format_prompt([49, 77, 93], 33)   # → \"...Using the numbers [49, 77, 93], create an equation that equals 33. ...\"" },
+    { on: ["ftrain", "ftest", "base15", "trT", "outT"], hot: ["trT", "outT"], arrows: ["a_base_trT", "a_trT_out"],
+      say: "因为加了 --popo，选 POPOTrainer：载入 Qwen2.5-1.5B，_install_popo 建一个空的回放缓冲区；然后把全部参数、数据指纹、源码指纹和库版本写进输出目录 popo_s42/ 里的 manifest.json。",
+      code: "trainer_cls = (POPOTrainer if a.popo else OPDTrainer if a.opd else FiniteGRPOTrainer)\ntrainer._install_popo(capacity=a.prompts_per_rollout, score_batch_size=1, rho_clip=a.rho_clip)\nwrite_json(output / \"manifest.json\", manifest)" },
+    { on: ["ftrain", "ftest", "base15", "trT", "outT", "logT"], hot: ["trT", "logT"], arrows: ["a_trT_log"],
+      say: "trainer.train() 跑 400 步。每一步：vLLM 给 4 道题各写 8 个回答 → reward_countdown 判分，答对 1 分、答错 0 分 → POPO 把死组换成历史组 → 算损失、查梯度 → 更新模型。每步一行指标打印到屏幕，存成 popo_s42.log。",
+      code: "trainer.train(resume_from_checkpoint=None)\nreward_countdown → [float(is_correct(c, n, t)) for c, n, t in zip(completions, nums, target)]" },
+    { on: ["ftest", "trT", "outT", "logT"], hot: ["outT"], arrows: ["a_trT_out"],
+      say: "每 50 步存一次：TRL 在 popo_s42/ 里存 checkpoint-<步数>/（模型加优化器，只留最新一份，用来续跑）；POPOTrainer 再把其中的模型文件硬链接到 eval_snapshots/checkpoint-<步数>/，这些评测快照一直留着。",
+      code: "POPOTrainer._save_checkpoint → os.link(source, eval_snapshots/checkpoint-{step}/...)\nwrite_json(checkpoint / \"replay_buffer.json\", self.export_replay_state())" },
+    { on: ["ftest", "trT", "outT", "logT"], hot: ["outT"], arrows: ["a_trT_out"],
+      say: "400 步跑完：最终模型和分词器存进 popo_s42/，最后写 TRAIN_COMPLETE.json（steps 400，用时 5,864 秒）。有这个文件，就说明这次训练完整跑完了。",
+      code: "tokenizer.save_pretrained(a.output_dir)\nwrite_json(output / \"TRAIN_COMPLETE.json\", {\"elapsed_seconds\": ..., \"steps\": 400, \"model_saved\": True, ...})" },
+    { on: ["ftest", "outT", "evT"], hot: ["evT", "ftest"], arrows: ["a_test_evT"],
+      pkTrain: ["evTa", TEST], pkTest: ["evTb", TEST4], pkTestKind: "drop",
+      say: "用户运行 evaluate_countdown.py。它读测试文件，也先筛：只留 3 个数字的题。3,000 题里 3 个数字的 1,477 题留下，4 个数字的 1,523 题丢掉；例如第 3 行 [66, 33, 28, 11] → 55 被丢掉。",
+      code: "rows = [json.loads(line) for line in Path(a.test_file).read_text().splitlines() if line.strip()]\nrows = [r for r in rows if len(r[\"nums\"]) == 3]   # 3,000 → 1,477" },
+    { on: ["ftest", "outT", "evT"], hot: ["evT", "outT"], arrows: ["a_out_evT"], pkTest: ["evT", TEST],
+      say: "用 vLLM 载入 eval_snapshots/checkpoint-400，温度 0（每次都选概率最大的 token），一次把这 1,477 题全答完。",
+      code: "llm = LLM(model=a.model, dtype=\"bfloat16\", ...)\nparams = SamplingParams(temperature=0.0, max_tokens=a.max_tokens, stop=STOPS)\noutputs = llm.generate(prompts, params)" },
+    { on: ["ftest", "outT", "evT", "resT"], hot: ["resT"], arrows: ["a_evT_res"], pkTest: ["evT", "(42 - 32) * 5 ✓"], pkTestKind: "good",
+      say: "逐题判分：[42, 32, 5] → 50 这题，教师写的是 <answer> (42 - 32) * 5，三个数各用一次、结果是 50，判对。每题一行先写进 .partial，全部写完才改名成 step0400.jsonl。",
+      code: "ok = is_correct(completion, row[\"nums\"], row[\"target\"])\npartial.replace(out_path)" },
+    { on: ["ftest", "outT", "evT", "resT", "cmpT"], hot: ["cmpT"], arrows: ["a_evT_cmp"], pkTest: ["evT", "(42 - 32) * 5 ✓"], pkTestKind: "good",
+      say: "最后写 step0400.jsonl.complete.json：1,477 题答对 811，正确率 54.91%。第 50、100……400 步的 8 个快照，每个都这样评一次。",
+      code: "write_json(str(out_path) + \".complete.json\", {\"step\": 400, \"count\": 1477, \"correct\": 811, \"accuracy\": 0.5491, ...})" },
+    { on: ["ftrain", "ftest", "base15", "trT", "evT", "resT", "cmpT"], hot: ["trT", "cmpT"], arrows: [],
+      say: "GRPO 教师走一模一样的流程，只是命令里不加 --popo，用的是 FiniteGRPOTrainer。它的第 400 步快照答对 717 题，比 POPO 教师少 94 题。",
+      code: "trainer_cls = (... else FiniteGRPOTrainer)   # 没加 --popo 也没加 --opd" },
+    { on: ["ftrain", "outT", "base05", "trS"], hot: ["trS"], arrows: ["a_train_trS", "a_base_trS", "a_outT_trS"],
+      say: "用户启动学生训练 train.py --opd，--model 是 Qwen2.5-0.5B，--opd-teacher-model 指向 popo_s42/。读同一个训练文件、同样筛到 9,937 题；这次选 OPDTrainer，_install_opd 把 popo_s42/ 里的最终模型载入成不再更新的教师。",
+      code: "trainer._install_opd(teacher_path=a.opd_teacher_model, teacher_tokenizer=opd_teacher_tokenizer, opd_weight_clip=a.opd_weight_clip, ...)" },
+    { on: ["outT", "base05", "trS", "outS", "logS"], hot: ["trS", "outS", "logS"], arrows: ["a_trS_out", "a_trS_log"],
+      say: "跑 400 步。每一步学生自己写 4 × 8 个回答，教师给学生回答里的每个 token 打分；教师的 logp 减学生的 logp，限制在 ±3 之内，就是这个 token 的优势。每 100 步存一个 checkpoint-<步数>/，指标存成 opd_s42.log。",
+      code: "teacher_logps = teacher_logps_no_grad(self.opd_teacher, ...)\nweight, clip_fraction = opd_token_weights(student_logps, teacher_logps, completion_mask, self.opd_weight_clip)\napply_opd_token_advantages(out, weight, advantage_scale=self.opd_advantage)   # −1：教师 logp − 学生 logp" },
+    { on: ["ftest", "outS", "evS"], hot: ["evS"], arrows: ["a_test_evS", "a_outS_evS"], pkTest: ["evS", TEST],
+      say: "用同一个 evaluate_countdown.py 评学生：--model 依次换成 opd_s42/ 里的 checkpoint-100、200、300、400，同样先把测试文件筛成那 1,477 道 3 个数字的题，温度 0。",
+      code: "python evaluate_countdown.py --model <opd_s42>/checkpoint-400 --test-file countdown_test.jsonl --output .../step0400.jsonl --step 400 --max-tokens 1024" },
+    { on: ["ftest", "outS", "evS", "resS", "cmpS"], hot: ["resS", "cmpS"], arrows: ["a_evS_res", "a_evS_cmp"],
+      pkTest: ["evS", "没有 <answer> ✗"], pkTestKind: "bad",
+      say: "[42, 32, 5] → 50 这题，学生第 400 步的回答一直在算，始终没写出 <answer>，判错。整份 1,477 题答对 347（23.49%），写进 step0400.jsonl.complete.json。",
+      code: "extract_equation(completion)   # → None，没有 <answer>\n{\"step\": 400, \"count\": 1477, \"correct\": 347, \"accuracy\": 0.2349, ...}" },
+    { on: ["logT", "cmpT", "logS", "cmpS", "plot", "figs"], hot: ["plot", "figs"], arrows: ["a_in_plot", "a_plot_figs"],
+      say: "最后用户运行 plot_paper_figures.py：读 4 份训练日志（每份 400 步指标）和 23 个 .complete.json，写出 training_metrics.csv、evaluation_metrics.csv 和 6 张图，每张图存 SVG 和 PNG。它不启动训练也不启动评测。",
+      code: "parse_log(rel)   # 每份日志必须正好 400 条指标\neval_plot(...) · dynamics(...) → save(fig, name)   # reports/figures/*.svg, *.png" }
+  ];
+
+  /* ---- 点击说明 ---- */
+  var PROJ = "项目文件夹 = 你 clone 下来的 POPO-OPD-Relay 那个目录。";
+  var MACH = "/data/Math-RLVR-POPO";
+  var TDIR = MACH + "/countdown_n3_s42_rho2_20261021";
+  var SDIR = MACH + "/opd_full_distill_popo_20261022";
+  var ARCH = "项目文件夹/results/raw/";
+  var NOTES = {
+    hf: { title: "Countdown-Tasks-3to4", rows: [
+      ["是什么", "公开的 Countdown 题库：每道题给 3 或 4 个数字和一个目标数，要求用 + − × ÷ 把每个数字恰好用一次，算出目标数。"],
+      ["在哪里", { scope: "hub", path: "Jiayi-Pan/Countdown-Tasks-3to4（train split）", hint: "下载后放在本机的 Hugging Face 缓存里。" }],
+      ["谁创建、何时删", "不是本项目建的；prepare_countdown.py 只读一次。"] ] },
+    prep: { title: "prepare_countdown.py", rows: [
+      ["是什么", "备题脚本，整个项目只运行一次：下载题库、按种子 0 洗牌、切成测试题和训练题两份，互不重叠。它不管数字个数，3 个和 4 个数字的题都写进去，最后打印两种各有多少题。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/prepare_countdown.py", hint: PROJ }],
+      ["谁运行、何时结束", "用户运行；写完两个文件、打印行数和 SHA-256 就退出。两个文件已存在时直接退出，不覆盖。"] ] },
+    ftrain: { title: "countdown_train.jsonl", rows: [
+      ["是什么", "20,000 道候选训练题，每行 {\"nums\": [...], \"target\": ...}：3 个数字的 9,937 题，4 个数字的 10,063 题，混在一起。train.py 读进来后只留 3 个数字的 9,937 题。例：第 1 行 [49, 77, 93] → 33 留下；第 2 行 [9, 50, 22, 49] → 99 丢掉。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/data/countdown_train.jsonl", hint: "训练机上用的是同内容的 " + MACH + "/data/countdown_train.jsonl，靠环境变量 COUNTDOWN_TRAIN_FILE 告诉 train.py。" }],
+      ["谁创建、何时删", "prepare_countdown.py 写出，一直保留；教师和学生训练读的都是它。"] ] },
+    ftest: { title: "countdown_test.jsonl", rows: [
+      ["是什么", "3,000 道候选测试题：3 个数字的 1,477 题，4 个数字的 1,523 题，混在一起。evaluate_countdown.py 读进来后只留 3 个数字的 1,477 题。例：第 7 行 [42, 32, 5] → 50 留下，在 1,477 题里排第 3（idx 2）；第 3 行 [66, 33, 28, 11] → 55 丢掉。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/data/countdown_test.jsonl", hint: "评测时用 --test-file 指定。" }],
+      ["谁创建、何时删", "prepare_countdown.py 写出，一直保留；每次评测都读它。"] ] },
+    base15: { title: "Qwen2.5-1.5B", rows: [
+      ["是什么", "教师训练的起点模型（权重、配置、分词器）。GRPO 教师和 POPO 教师都从它开始。"],
+      ["在哪里", { scope: "machine", path: "/data/models/Qwen2.5-1.5B", hint: "训练机本地的副本，manifest.json 的 arguments.model 记的就是这个路径。" }],
+      ["谁创建、何时删", "提前放在训练机上；train.py 用 --model 读入。"] ] },
+    trT: { title: "train.py --popo", rows: [
+      ["是什么", "训练教师的进程。正式运行的参数：--seed 42 --steps 400 --prompts-per-rollout 4 --micro-batch 2 --save-steps 50，--rho-clip 默认 2.0。不加 --popo 就是 GRPO 教师。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/train.py", hint: "它 import src/POPO.py、src/OPD.py、src/countdown.py、src/artifacts.py。" }],
+      ["谁运行、何时结束", "用户在训练机上启动；400 步跑完、写好 TRAIN_COMPLETE.json 后退出。"] ] },
+    outT: { title: "popo_s42/", rows: [
+      ["是什么", "教师训练的输出目录：manifest.json、checkpoint-<步数>/（只留最新一份）、eval_snapshots/checkpoint-50 … 400/、最终模型和分词器、TRAIN_COMPLETE.json。"],
+      ["在哪里", { scope: "machine", path: TDIR + "/popo_s42/", hint: "仓库里只存了 manifest.json 和 TRAIN_COMPLETE.json：" + ARCH + "countdown_paired_seed42_20261021/popo_s42/；模型文件太大，不进仓库。" }],
+      ["谁创建、何时删", "train.py 用 --output-dir 指定，必须是空目录；训练时陆续写入，训练完一直保留，学生训练还要读里面的最终模型。"] ] },
+    logT: { title: "popo_s42.log", rows: [
+      ["是什么", "教师训练时打印到屏幕的全部内容：每步一行指标字典（loss、奖励、grad_norm、popo/dead_fraction 等），共 400 步。"],
+      ["在哪里", { scope: "project", path: ARCH + "countdown_paired_seed42_20261021/popo_s42.log" }],
+      ["谁创建、何时删", "启动训练的命令把屏幕输出另存成这个文件；plot_paper_figures.py 读它画训练过程图。"] ] },
+    evT: { title: "evaluate_countdown.py", rows: [
+      ["是什么", "评测进程：读测试文件后只留 3 个数字的 1,477 题，用 vLLM 载入一个模型，温度 0 答完，用 countdown.py 的 is_correct 判分。教师评测时 --max-tokens 1024。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/evaluate_countdown.py" }],
+      ["谁运行、何时结束", "训练结束后用户另行启动，每个快照运行一次；写完 .complete.json 就退出。输出文件已存在就不运行。"] ] },
+    resT: { title: "step0400.jsonl", rows: [
+      ["是什么", "逐题结果，每题一行：idx、ok、equation、nums、target、completion。例：idx 2 是 {\"ok\": true, \"equation\": \"(42 - 32) * 5\", ...}。"],
+      ["在哪里", { scope: "project", path: ARCH + "countdown_paired_seed42_20261021/popo_s42_eval/step0400.jsonl" }],
+      ["谁创建、何时删", "evaluate_countdown.py 先写成 step0400.partial，全部写完才改名成这个文件；一直保留。"] ] },
+    cmpT: { title: "step0400.jsonl.complete.json", rows: [
+      ["是什么", "评测完成标记：step 400、model（评的是哪个快照）、count 1477、correct 811、accuracy 0.5491、结果文件和测试文件的 SHA-256、解码设置。"],
+      ["在哪里", { scope: "project", path: ARCH + "countdown_paired_seed42_20261021/popo_s42_eval/step0400.jsonl.complete.json" }],
+      ["谁创建、何时删", "evaluate_countdown.py 最后写；有它才算这次评测完整。plot_paper_figures.py 从这里读答对数。"] ] },
+    base05: { title: "Qwen2.5-0.5B", rows: [
+      ["是什么", "学生训练的起点模型，比教师小。"],
+      ["在哪里", { scope: "hub", path: "Qwen/Qwen2.5-0.5B", hint: "实际用的版本：commit 060db6499f32faf8b98477b0a26969ef7d8b9987。" }],
+      ["谁创建、何时删", "不是本项目建的；train.py 用 --model 读入。"] ] },
+    trS: { title: "train.py --opd", rows: [
+      ["是什么", "训练学生的进程，和教师用的是同一个 train.py。正式运行：--model Qwen/Qwen2.5-0.5B --opd --opd-teacher-model " + TDIR + "/popo_s42 --opd-weight-clip 3 --save-steps 100 --seed 42 --steps 400。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/train.py", hint: "OPD 的部分在 src/OPD.py 的 OPDGRPOTrainer。另一个学生的教师是重训的 GRPO 教师，流程相同。" }],
+      ["谁运行、何时结束", "教师训练完后用户启动；400 步跑完、写好 TRAIN_COMPLETE.json 后退出。"] ] },
+    outS: { title: "opd_s42/", rows: [
+      ["是什么", "学生训练的输出目录：manifest.json、checkpoint-100 / 200 / 300 / 400、最终模型和分词器、TRAIN_COMPLETE.json（用时 4,121 秒）。"],
+      ["在哪里", { scope: "machine", path: SDIR + "/opd_s42/", hint: "仓库里存了 manifest.json、TRAIN_COMPLETE.json、config.json、generation_config.json 和分词器文件：" + ARCH + "opd_full_distill_popo_20261022/opd_s42/。" }],
+      ["谁创建、何时删", "train.py 写入，一直保留。"] ] },
+    logS: { title: "opd_s42.log", rows: [
+      ["是什么", "学生训练时打印到屏幕的全部内容，每步一行指标字典，共 400 步。"],
+      ["在哪里", { scope: "project", path: ARCH + "opd_full_distill_popo_20261022/opd_s42.log" }],
+      ["谁创建、何时删", "启动训练的命令把屏幕输出另存成这个文件；plot_paper_figures.py 读它。"] ] },
+    evS: { title: "evaluate_countdown.py", rows: [
+      ["是什么", "和评教师是同一个脚本，只是 --model 换成学生的 checkpoint-<步数>。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/evaluate_countdown.py" }],
+      ["谁运行、何时结束", "学生训练完后用户启动，每个检查点运行一次。"] ] },
+    resS: { title: "step0400.jsonl", rows: [
+      ["是什么", "学生第 400 步的逐题结果。例：idx 2 是 {\"ok\": false, \"equation\": null, ...}，回答里一直在算，没写出 <answer>。"],
+      ["在哪里", { scope: "project", path: ARCH + "opd_full_distill_popo_20261022/opd_s42_eval/step0400.jsonl" }],
+      ["谁创建、何时删", "evaluate_countdown.py 写出，一直保留。"] ] },
+    cmpS: { title: "step0400.jsonl.complete.json", rows: [
+      ["是什么", "学生第 400 步的评测完成标记：count 1477、correct 347、accuracy 0.2349。"],
+      ["在哪里", { scope: "project", path: ARCH + "opd_full_distill_popo_20261022/opd_s42_eval/step0400.jsonl.complete.json" }],
+      ["谁创建、何时删", "evaluate_countdown.py 最后写；plot_paper_figures.py 读它。"] ] },
+    plot: { title: "plot_paper_figures.py", rows: [
+      ["是什么", "汇总脚本，没有 main()，从上往下执行：RUNS 列了 4 份训练日志（GRPO、POPO、两个学生），EVAL 列了 23 个 .complete.json（2 个基座 + 教师各 8 个 + POPO 教师的学生 4 个 + GRPO 教师的学生 1 个）。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/scripts/plot_paper_figures.py" }],
+      ["谁运行、何时结束", "所有训练和评测都完成后用户运行；写完两张表、六张图就退出。"] ] },
+    figs: { title: "reports/figures/", rows: [
+      ["是什么", "training_metrics.csv（4 次训练 × 400 步的指标）、evaluation_metrics.csv（23 条评测成绩），和 6 张图：教师、学生各一张正确率图、训练过程图、机制图，每张存 .svg 和 .png。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/reports/figures/" }],
+      ["谁创建、何时删", "plot_paper_figures.py 写出，提交在仓库里，README 引用这些图。"] ] }
+  };
+
+  /* ---- 类型 ---- */
+  /* 每个框的输入、输出和真实数据的样子，接在说明后面 */
+  var EXTRA = {"hf": [["长什么样", "每行一道题。prepare_countdown.py 只取其中的 nums（3 个或 4 个数字）和 target 两个字段，转成整数写出去。"]], "prep": [["输入", "Hugging Face 上的 Countdown-Tasks-3to4（train split）；参数默认 --test-size 3000 --train-size 20000 --seed 0 --out-dir data。"], ["输出", "data/countdown_test.jsonl 和 data/countdown_train.jsonl；屏幕上每个文件打印一行：行数、3 个和 4 个数字的题各多少、文件的 SHA-256。"], ["", {"cap": "屏幕上打印的两行（数字是对仓库里这两个文件重新数、重新算出来的）：", "pre": "train: 20000 rows, nums-count distribution {3: 9937, 4: 10063}, sha256=50628dee34fc849c39ab8e4e8d7555636d9d02d0c4c93a516c54c04124c5d176\ntest: 3000 rows, nums-count distribution {3: 1477, 4: 1523}, sha256=ce8990c39d4cdfd9f0fa4dc12b10b1b554618fd9806f37b25effa8c5846ca53d"}]], "ftrain": [["长什么样", {"cap": "前 3 行（真实记录）：", "pre": "{\"nums\": [49, 77, 93], \"target\": 33}      ← 3 个数字，训练时留下\n{\"nums\": [9, 50, 22, 49], \"target\": 99}   ← 4 个数字，train.py 读进来后丢掉\n{\"nums\": [31, 34, 33], \"target\": 36}      ← 3 个数字，训练时留下"}]], "ftest": [["长什么样", {"cap": "前 7 行（真实记录）。右边是筛完 3 个数字以后，这一题在 1,477 题里的 idx：", "pre": "{\"nums\": [75, 77, 9], \"target\": 18}       ← idx 0\n{\"nums\": [28, 53, 8], \"target\": 89}       ← idx 1\n{\"nums\": [66, 33, 28, 11], \"target\": 55}  ← 4 个数字，丢掉\n{\"nums\": [30, 66, 81, 30], \"target\": 28}  ← 4 个数字，丢掉\n{\"nums\": [95, 19, 30, 62], \"target\": 82}  ← 4 个数字，丢掉\n{\"nums\": [63, 77, 56, 35], \"target\": 14}  ← 4 个数字，丢掉\n{\"nums\": [42, 32, 5], \"target\": 50}       ← idx 2，这一页一直跟着的例子"}]], "base15": [["长什么样", {"cap": "教师 manifest.json 里记着的（真实记录）：", "pre": "{\"arguments\": {\"model\": \"/data/models/Qwen2.5-1.5B\", \"revision\": \"main\", …},\n \"resolved_model_commit\": null}"}], ["", "resolved_model_commit 取的是模型配置里的 _commit_hash；这里从训练机本地文件夹载入，没有这个值，所以是 null。"]], "trT": [["输入", "环境变量 COUNTDOWN_TRAIN_FILE 指向的训练文件；--model 指向的 Qwen2.5-1.5B；命令行参数。"], ["输出", "--output-dir 指定的 popo_s42/；屏幕输出（存成 popo_s42.log）。"], ["", {"cap": "发给模型的题目：format_prompt([49, 77, 93], 33) 的输出（用仓库里的 src/countdown.py 实际跑出来的）：", "pre": "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer.\nUser: Using the numbers [49, 77, 93], create an equation that equals 33. You can use basic arithmetic operations (+, -, *, /) and each number can only be used once. Show your work in <think> <\/think> tags. And return the final answer in <answer> <\/answer> tags, for example <answer> (1 + 2) / 3 <\/answer>.\nAssistant: Let me solve this step by step.\n<think>"}], ["", {"cap": "建好训练器后打印的一行（popo_s42.log 里的真实记录）：", "pre": "task=countdown arm=POPO seed=42 train=9937 steps=400 generation_batch=32 G=8 lr=5e-06 loss=grpo rho_clip=2.0"}]], "outT": [["长什么样", {"cap": "训练机上这个文件夹的样子（按 train.py 的代码写出；最终模型的文件名省略）：", "pre": "popo_s42/\n├── manifest.json            训练开始前写\n├── checkpoint-400/          TRL 存的检查点，save_total_limit=1，只留最新一份\n│     模型文件、optimizer.pt、scheduler.pt、trainer_state.json、\n│     replay_buffer.json、RESUME_READY.json\n├── eval_snapshots/\n│   ├── checkpoint-50/       模型文件的硬链接 + SNAPSHOT_COMPLETE.json\n│   ├── …                    每 50 步一个，共 8 个\n│   └── checkpoint-400/\n├── 最终模型和分词器文件\n└── TRAIN_COMPLETE.json      最后写"}], ["", {"cap": "manifest.json 的一部分（真实记录；training_config 和 source_hashes 很长，省略）：", "pre": "{\"arguments\": {\"model\": \"/data/models/Qwen2.5-1.5B\", \"seed\": 42, \"popo\": true, \"steps\": 400,\n               \"prompts_per_rollout\": 4, \"micro_batch\": 2, \"lr\": 5e-06, \"completion_length\": 1024, …},\n \"dataset_fingerprint\": \"5a951034cf67ff26\",\n \"dataset_sha256\": \"3941371498c172f132178117b6fd85def7d9b8d4cb12bccf257452f54687276e\",\n \"versions\": {\"torch\": \"2.13.0\", \"trl\": \"1.13.0\", \"transformers\": \"5.17.0\", \"vllm\": \"0.28.0\", \"datasets\": \"5.0.1\"},\n \"prompt_groups\": 4, \"completion_rows\": 32, \"micro_batch_rows\": 2,\n \"accumulation_steps\": 16, \"popo_rho_clip\": 2.0}"}], ["", "dataset_sha256 是筛完以后 9,937 题内容的指纹，不是整个训练文件的 SHA-256，所以和 prepare_countdown.py 打印的那个不一样。"], ["", {"cap": "TRAIN_COMPLETE.json（真实记录）：", "pre": "{\n  \"elapsed_seconds\": 5863.68003092194,\n  \"steps\": 400,\n  \"model_saved\": true,\n  \"peak_allocated_bytes\": 24475403264\n}"}]], "logT": [["长什么样", {"cap": "第 1 步的那行指标（真实记录，只留几个字段）：", "pre": "{'loss': '0', 'grad_norm': '0', 'reward': '0', 'frac_reward_zero_std': '1', 'popo/replayed_groups': '0', 'popo/dead_fraction': '1', 'popo/buffer_size': '0', 'step_time': '9.85', …}"}], ["", {"cap": "第 400 步的那行指标（真实记录，只留几个字段）：", "pre": "{'loss': '0.0006386', 'grad_norm': '3.531', 'reward': '0.125', 'frac_reward_zero_std': '0.75', 'popo/replayed_groups': '3', 'popo/dead_fraction': '0.75', 'popo/buffer_size': '4', 'step_time': '17.6', …}"}], ["", {"cap": "最后两行（真实记录）：", "pre": "{'train_runtime': '5863', 'train_samples_per_second': '2.183', 'train_steps_per_second': '0.068', 'train_loss': '-0.001341', 'epoch': '0.161'}\nTRAIN_COMPLETE output=/data/Math-RLVR-POPO/countdown_n3_s42_rho2_20261021/popo_s42"}], ["", "前面还夹着进度条和 vLLM 的日志；plot_paper_figures.py 只挑以 {'loss' 开头的那些字典，每份日志正好 400 个。"]], "evT": [["输入", "--test-file 指向的测试文件；--model 指向的 eval_snapshots/checkpoint-400；--max-tokens 1024；--step 400。"], ["输出", "--output 指定的 step0400.jsonl（先写成 step0400.partial）和 step0400.jsonl.complete.json。"], ["", {"cap": "这次评测用的设置（取自 .complete.json 里记下的 model 和 decoding）：", "pre": "model: /data/Math-RLVR-POPO/countdown_n3_s42_rho2_20261021/popo_s42/eval_snapshots/checkpoint-400\ntemperature: 0.0     每次都选概率最大的 token\nmax_tokens: 1024     每个回答最多 1,024 个 token\nstop: [\"<\/answer>\", \"\\nUser:\"]   写到这两个之一就停"}]], "resT": [["长什么样", {"cap": "idx 2 这一行（真实记录；completion 共 475 个字，中间用 … 省略）：", "pre": "{\"idx\": 2, \"ok\": true, \"equation\": \"(42 - 32) * 5\", \"nums\": [42, 32, 5], \"target\": 50,\n \"completion\": \" 42 + 32 <\/think> = 74\\n<think> 74 - 5 <\/think> = 69\\nOops, that's too b\" … \"ost there...\\n<think> 42 - 32 <\/think> = 10\\n<think> 10 * 5 <\/think> = 50\\nYes! I got it.\\n<answer> (42 - 32) * 5 \"}"}], ["", "completion 结尾没有 <\/answer>：生成写到 <\/answer> 就停，<\/answer> 本身不算进 completion。"]], "cmpT": [["长什么样", {"cap": "整个文件（真实记录）：", "pre": "{\n  \"step\": 400,\n  \"model\": \"/data/Math-RLVR-POPO/countdown_n3_s42_rho2_20261021/popo_s42/eval_snapshots/checkpoint-400\",\n  \"count\": 1477,\n  \"correct\": 811,\n  \"accuracy\": 0.5490859851049424,\n  \"sha256\": \"d76aad89e5ee7f96fdf69d4a84938d6dbd71118ae8cde162db51cda059181ab8\",\n  \"test_file_sha256\": \"2b3c6ee4700ffc32cd5eb1c7db7cd14ce865d588a91d32aceec15c302424dd9a\",\n  \"nums_filter\": 3,\n  \"decoding\": {\n    \"temperature\": 0.0,\n    \"max_tokens\": 1024,\n    \"stop\": [\n      \"<\/answer>\",\n      \"\\nUser:\"\n    ]\n  }\n}"}], ["", "sha256 是 step0400.jsonl 的指纹；test_file_sha256 是测试文件内容后面接上 \"|nums=3\" 再算的指纹，表示用的是哪份测试题、筛的是 3 个数字。"]], "base05": [["长什么样", {"cap": "学生 manifest.json 里记着的（真实记录）：", "pre": "{\"arguments\": {\"model\": \"Qwen/Qwen2.5-0.5B\", \"revision\": \"main\", …},\n \"resolved_model_commit\": \"060db6499f32faf8b98477b0a26969ef7d8b9987\"}"}]], "trS": [["输入", "同一个训练文件；--model Qwen/Qwen2.5-0.5B；--opd-teacher-model 指向的 popo_s42/（教师的最终模型）。"], ["输出", "--output-dir 指定的 opd_s42/；屏幕输出（存成 opd_s42.log）。"], ["", {"cap": "建好训练器后打印的一行（opd_s42.log 里的真实记录；当时的代码把 arm 写作 OPD-full）：", "pre": "task=countdown arm=OPD-full seed=42 train=9937 steps=400 generation_batch=32 G=8 lr=5e-06 loss=grpo rho_clip=n/a\nopd_teacher=/data/Math-RLVR-POPO/countdown_n3_s42_rho2_20261021/popo_s42 opd_weight_clip=3.0 opd_teacher_batch_size=8"}]], "outS": [["长什么样", {"cap": "仓库里存的那一份（真实文件列表；模型权重太大，没有存）：", "pre": "results/raw/opd_full_distill_popo_20261022/opd_s42/\n├── manifest.json\n├── TRAIN_COMPLETE.json\n├── config.json\n├── generation_config.json\n├── chat_template.jinja\n├── tokenizer.json\n└── tokenizer_config.json"}], ["", {"cap": "TRAIN_COMPLETE.json（真实记录）：", "pre": "{\n  \"elapsed_seconds\": 4120.911769363098,\n  \"steps\": 400,\n  \"model_saved\": true,\n  \"peak_allocated_bytes\": 27093288960\n}"}]], "logS": [["长什么样", {"cap": "第 1 步的那行指标（真实记录，只留几个字段）：", "pre": "{'loss': '0.6429', 'grad_norm': '22.12', 'reward': '0', 'completions/mean_length': '201.7', 'opd/weight_mean': '0.4699', 'opd/weight_min': '-3', 'opd/weight_max': '3', 'opd/weight_clip_fraction': '0.08552', 'step_time': '9.903', …}"}], ["", {"cap": "第 400 步的那行指标（真实记录，只留几个字段）：", "pre": "{'loss': '0.04941', 'grad_norm': '1.242', 'reward': '0', 'completions/mean_length': '956.2', 'opd/weight_mean': '0.04626', 'opd/weight_min': '-3', 'opd/weight_max': '3', 'opd/weight_clip_fraction': '0.007255', 'step_time': '10.86', …}"}], ["", "reward 一直记着答对率，但学生训练不用它，用的是 opd/weight_*：学生 logp − 教师 logp，限制在 −3 到 3 之间。"]], "evS": [["输入", "同一个测试文件；--model 指向 opd_s42/checkpoint-<步数>；--max-tokens 1024。"], ["输出", "opd_s42_eval/ 里每个检查点一对 step<步数>.jsonl 和 .complete.json，还有 eval.log（vLLM 的屏幕输出）。"], ["", {"cap": "eval.log 的第一行（真实记录，评 checkpoint-100 时）：", "pre": "INFO 10-22 14:01:25 [api_utils.py:272] non-default args: {'dtype': 'bfloat16', 'max_model_len': 2048,\n 'gpu_memory_utilization': 0.85, 'disable_log_stats': True,\n 'model': '/data/Math-RLVR-POPO/opd_full_distill_popo_20261022/opd_s42/checkpoint-100'}"}]], "resS": [["长什么样", {"cap": "idx 2 这一行（真实记录；completion 共 1795 个字，中间用 … 省略）：", "pre": "{\"idx\": 2, \"ok\": false, \"equation\": null, \"nums\": [42, 32, 5], \"target\": 50,\n \"completion\": \" 5 + 32 <\/think> = 37\\n<think> 37 - 42 <\/think> = -5\\n<think> \" … \"k> = 10\\n<think> 10 - 42 <\/think> = -32\\n<think> -32 + 32 <\/think> = 0\\n<think> 0 + 5 <\/think\"}"}], ["", "回答里一直在算，没写出 <answer>，所以 equation 是 null，判错。"]], "cmpS": [["长什么样", {"cap": "整个文件（真实记录）：", "pre": "{\n  \"step\": 400,\n  \"model\": \"/data/Math-RLVR-POPO/opd_full_distill_popo_20261022/opd_s42/checkpoint-400\",\n  \"count\": 1477,\n  \"correct\": 347,\n  \"accuracy\": 0.23493568043331076,\n  \"sha256\": \"2dc483160299e79639180e3faf00a191be4f12cc5251cd35f77d8d8972ec7778\",\n  \"test_file_sha256\": \"2b3c6ee4700ffc32cd5eb1c7db7cd14ce865d588a91d32aceec15c302424dd9a\",\n  \"nums_filter\": 3,\n  \"decoding\": {\n    \"temperature\": 0.0,\n    \"max_tokens\": 1024,\n    \"stop\": [\n      \"<\/answer>\",\n      \"\\nUser:\"\n    ]\n  }\n}"}], ["", "test_file_sha256 和教师那份一样：两边答的是同一份 1,477 道题。"]], "plot": [["输入", "RUNS 里的 4 份训练日志，EVAL 里的 23 个 .complete.json。"], ["输出", "reports/figures/ 里的两张表和六张图。"], ["", {"cap": "RUNS（scripts/plot_paper_figures.py 里的真实代码）：", "pre": "RUNS = {\n    \"GRPO\": (\"GRPO\", \"results/raw/countdown_paired_seed42_20261021/grpo_s42.log\", \"#222222\"),\n    \"POPO\": (\"POPO\", \"results/raw/countdown_paired_seed42_20261021/popo_s42.log\", \"#2C6E9B\"),\n    \"OPD_POPO\": (\"OPD / POPO teacher\", \"results/raw/opd_full_distill_popo_20261022/opd_s42.log\", \"#2C6E9B\"),\n    \"OPD_GRPO\": (\"OPD / GRPO teacher\", \"results/raw/opd_full_distill_grpo_20261022/opd_s42.log\", \"#B56B2A\"),\n}"}], ["", "EVAL 的 23 个：教师基座 1 个、GRPO 教师 8 个、POPO 教师 8 个、学生基座 1 个、POPO 教师带的学生 4 个、GRPO 教师带的学生 1 个。"]], "figs": [["长什么样", {"cap": "文件夹里的文件（真实文件列表）：", "pre": "reports/figures/\n├── training_metrics.csv          1,600 行数据：4 次训练 × 400 步\n├── evaluation_metrics.csv        23 行数据：每个 .complete.json 一行\n├── teacher_eval_accuracy.svg / .png\n├── teacher_training_dynamics.svg / .png\n├── teacher_training_mechanism.svg / .png\n├── opd_eval_accuracy.svg / .png\n├── opd_training_dynamics.svg / .png\n└── opd_training_mechanism.svg / .png"}], ["", {"cap": "evaluation_metrics.csv 的表头和前三行（真实记录，source_path 省略）：", "pre": "group,run,step,count,correct,accuracy_pct,source_path\nteacher,Teacher base (1.5B),0,1477,7,0.47393364928909953,…\nteacher,GRPO teacher,50,1477,202,13.676371022342588,…\nteacher,GRPO teacher,100,1477,394,26.675693974272175,…"}], ["", {"cap": "training_metrics.csv 的前三列和前两行（真实记录；共 44 列）：", "pre": "run,step,loss,…\nGRPO,1,0.0,…\nGRPO,2,0.0002688,…"}]]};
+  Object.keys(EXTRA).forEach(function (id) { NOTES[id].rows = NOTES[id].rows.concat(EXTRA[id]); });
+
+  var KIND = {};
+  BOXES.forEach(function (b) { KIND[b[0]] = b[1]; });
+  var KIND_TEXT = { folder: "文件夹", file: "文件", process: "进程（正在运行的程序）" };
+  var KIND_SHORT = { folder: "文件夹", file: "文件", process: "进程" };
+  var KIND_PATH = {
+    folder: ["M2 4.5A1 1 0 0 1 3 3.5h3l1.5 1.7H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"],
+    file: ["M4 2h5l3 3v9H4z", "M9 2v3h3"],
+    process: ["M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2z", "M6.6 5.6 10.6 8l-4 2.4z"]
+  };
+
+  /* ---- 画框和箭头 ---- */
+  (function draw() {
+    var root = $("nodes");
+    BOXES.forEach(function (b) {
+      var g = mk("g", { id: P + b[0], "class": "node clickable" + (b[1] === "process" ? " proc" : "") }, root);
+      mk("rect", { "class": "box", x: b[2], y: b[3], width: b[4], height: b[5], rx: 10 }, g);
+      var single = b[5] < 50;
+      var t = mk("text", { "class": "title", x: b[2] + 14, y: single ? b[3] + 24 : b[3] + 32 }, g); t.textContent = b[6];
+      if (b[7]) { var s = mk("text", { "class": "sub", x: b[2] + 14, y: b[3] + 58 }, g); s.textContent = b[7]; }
+      var rx = b[2] + b[4];
+      var cy = single ? b[3] + b[5] / 2 : b[3] + 20;
+      var k = mk("g", { "class": "kind", transform: "translate(" + (rx - 50) + "," + (cy - 8) + ")" }, g);
+      var tt = mk("title", {}, k); tt.textContent = KIND_SHORT[b[1]];
+      KIND_PATH[b[1]].forEach(function (d) { mk("path", { d: d }, k); });
+      var icon = mk("g", { "class": "info" }, g);
+      mk("circle", { cx: rx - 18, cy: cy, r: 9 }, icon);
+      var it = mk("text", { x: rx - 18, y: cy + 4, "text-anchor": "middle" }, icon); it.textContent = "i";
+    });
+    var ar = $("arrows");
+    Object.keys(ARROWS).forEach(function (id) { mk("path", { id: P + id, "class": "arrow", d: ARROWS[id], "marker-end": "url(#" + P + "head)" }, ar); });
+  })();
+
+  function buildLegend() {
+    var box = $("legend");
+    ["folder", "file", "process"].forEach(function (k) {
+      var s = document.createElement("span"); s.className = "k-" + k;
+      var svg = document.createElementNS(SVGNS, "svg"); svg.setAttribute("viewBox", "0 0 16 16");
+      KIND_PATH[k].forEach(function (d) { mk("path", { d: d }, svg); });
+      s.appendChild(svg); s.appendChild(document.createTextNode(KIND_SHORT[k])); box.appendChild(s);
+    });
+  }
+
+  /* ---- 说明 ---- */
+  var selected = null;
+  var SCOPE_TEXT = { project: "项目文件夹内", machine: "训练机上", hub: "Hugging Face 上" };
+  function renderNote(id) {
+    var n = NOTES[id];
+    $("noteTitle").textContent = n.title;
+    var rowsAll = [["类型", KIND_TEXT[KIND[id]]]].concat(n.rows);
+    var dl = $("noteRows"); dl.textContent = "";
+    rowsAll.forEach(function (row) {
+      var dt = document.createElement("dt"); dt.textContent = row[0];
+      var dd = document.createElement("dd"); var v = row[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else if (v.pre !== undefined) {
+        if (v.cap) { var pc = document.createElement("p"); pc.className = "sample-cap"; pc.textContent = v.cap; dd.appendChild(pc); }
+        var pre = document.createElement("pre"); pre.className = "sample"; pre.textContent = v.pre; dd.appendChild(pre);
+      }
+      else {
+        var p1 = document.createElement("p");
+        var chip = document.createElement("span"); chip.className = "scope " + v.scope; chip.textContent = SCOPE_TEXT[v.scope];
+        var code = document.createElement("span"); code.className = "path"; code.textContent = v.path;
+        p1.appendChild(chip); p1.appendChild(code); dd.appendChild(p1);
+        if (v.hint) { var p2 = document.createElement("p"); p2.className = "hint"; p2.textContent = v.hint; dd.appendChild(p2); }
+      }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    BOXES.forEach(function (b) {
+      $(b[0]).classList.toggle("sel", b[0] === selected);
+      $(b[0]).setAttribute("aria-expanded", b[0] === selected ? "true" : "false");
+    });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  BOXES.forEach(function (b) {
+    var g = $(b[0]);
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button"); g.setAttribute("aria-expanded", "false");
+    g.setAttribute("aria-label", NOTES[b[0]].title + "，点击查看说明");
+    g.addEventListener("click", function () { choose(b[0]); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(b[0]); } });
+  });
+  $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+
+  /* ---- 翻页 ---- */
+  var cur = 0;
+  function setPacket(id, spec, kind) {
+    var el = $(id);
+    if (!spec) { el.classList.remove("show"); return; }
+    var p = AT[spec[0]];
+    var t = el.querySelector("text"); t.textContent = spec[1];
+    el.setAttribute("class", "packet show" + (kind ? " " + kind : ""));
+    var w = t.getComputedTextLength() + 22;
+    var r = el.querySelector("rect");
+    r.setAttribute("x", -w / 2); r.setAttribute("y", -11); r.setAttribute("width", w); r.setAttribute("height", 22); r.setAttribute("rx", 11);
+    el.style.transform = "translate(" + (p[0] - w / 2) + "px," + p[1] + "px)";
+  }
+  function show(i) {
+    cur = Math.max(0, Math.min(STEPS.length - 1, i));
+    var s = STEPS[cur];
+    BOXES.forEach(function (b) {
+      $(b[0]).classList.toggle("on", s.on.indexOf(b[0]) >= 0);
+      $(b[0]).classList.toggle("hot", s.hot.indexOf(b[0]) >= 0);
+    });
+    Object.keys(ARROWS).forEach(function (id) { $(id).classList.toggle("show", s.arrows.indexOf(id) >= 0); });
+    setPacket("pkTest", s.pkTest, s.pkTestKind);
+    setPacket("pkTrain", s.pkTrain, s.pkTrainKind);
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + STEPS.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === STEPS.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash("popo", cur + 1);
+  }
+  STEPS.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 页");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+
+  buildLegend();
+  show(0);
+
+  window.__v = window.__v || {};
+  window.__v.popo = { show: show, cur: function () { return cur; } };
+})();
+(function () {
+  var P = "a-";
+
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var $ = function (id) { return document.getElementById(P + id); };
+  function mk(tag, attrs, parent, text) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+
+  /* ---- 左边的部件 ---- */
+  var LX = 20, LW = 250, LH = 72;
+  var PARTS = [
+    ["dl",     "memory",   "RepeatSampler",          "按它的顺序取题"],
+    ["vllm",   "memory",   "vLLM 引擎",              "写回答，和训练同一张显卡"],
+    ["model",  "memory",   "self.model",             "正在训练的 Qwen2.5-1.5B"],
+    ["reward", "function", "reward_countdown",       "判分：答对 1，答错 0"],
+    ["opt",    "memory",   "AdamW（self.optimizer）", "攒满 16 次梯度才改参数"]
+  ];
+  var PY = {}; PARTS.forEach(function (p, i) { PY[p[0]] = 64 + i * 92; });
+
+  /* ---- 中间：out 的 32 行，4 组 × 8 ---- */
+  var OX = 300, OW = 440, GY0 = 168, GH = 70;
+  var FIELDS = ["prompt_ids", "completion_ids", "sampling_per_token_logps", "old_per_token_logps", "importance_sampling_ratio", "advantages"];
+  /* ---- 右边：_buffered_inputs 16 份 ---- */
+  var BX = 770, BW = 210;
+
+  var Q = ["题 0", "题 0", "题 0", "题 0", "题 0", "题 0", "题 0", "题 0"];
+  function same(t) { return [t, t, t, t, t, t, t, t]; }
+  var ASK = [same("题 0"), same("题 1"), same("题 2"), same("题 3")];
+  var ANS = [same("回答"), same("回答"), same("回答"), same("回答")];
+  var R = [same(0), [0, 0, 0, 1, 0, 0, 0, 0], same(0), same(0)];
+  var A = [same(0), [-0.35, -0.35, -0.35, 2.47, -0.35, -0.35, -0.35, -0.35], same(0), same(0)];
+
+  var STEPS = [
+    { on: ["dl"], hot: ["dl"], arrows: ["a_dl"], cells: ASK, cellKind: "text", fields: [],
+      gsub: ["同一道题抄 8 行", "", "", ""],
+      say: "第 2 步开始。RepeatSampler 按顺序取出 4 道题，每道抄成 8 行，一共 32 行；每行是发给模型的题目文字，外加 nums 和 target。",
+      code: "RepeatSampler(mini_repeat_count=8, batch_size=32 // 8, repeat_count=16)   # GRPOTrainer._get_train_sampler" },
+
+    { on: ["dl"], hot: [], arrows: [], cells: ASK, cellKind: "text", fields: [], slots: "empty",
+      say: "Trainer 调第 1 次 training_step，它调 GRPOTrainer._prepare_inputs。这一步还没生成过回答（self._step 是 16，能被 16 整除），所以要先生成。",
+      code: "generate_every = self.args.steps_per_generation * self.num_iterations   # 16 × 1\nif self._step % generate_every == 0 or self._buffered_inputs is None:\n    generation_batch = self._generate_and_score_completions(generation_batch)" },
+
+    { on: ["dl", "vllm", "model"], hot: ["vllm"], arrows: ["a_model_vllm"], cells: ASK, cellKind: "text", fields: [],
+      say: "第 1 步刚改过模型参数，vLLM 手里还是旧的。global_step（1）和上次拷参数时记下的 _last_loaded_step（0）不一样，就先把 self.model 的参数拷进 vLLM。",
+      code: "if self.use_vllm and self.state.global_step != self._last_loaded_step:\n    self.vllm_generation.sync_weights()\n    self._last_loaded_step = self.state.global_step   # GRPOTrainer._generate" },
+
+    { on: ["dl", "vllm"], hot: ["vllm"], arrows: ["a_vllm"], cells: ANS, cellKind: "text", fields: ["prompt_ids", "completion_ids", "sampling_per_token_logps"],
+      gsub: ["8 个回答各不相同（温度 1.0）", "", "", ""],
+      say: "vLLM 给 32 行各写一个回答：温度 1.0，所以同一道题的 8 个回答各不相同；最长 1,024 个 token，写到 </answer> 或 \\nUser: 就停。它顺手记下每个 token 采样时的 logp。这一步回答平均 163 个 token。",
+      code: "GRPOConfig(temperature=1.0, max_completion_length=1024, generation_kwargs={\"stop\": countdown.STOPS}, vllm_mode=\"colocate\")\n→ prompt_ids_list, completion_ids_list, sampling_per_token_logps_list = self._generate(prompts)" },
+
+    { on: ["dl", "vllm"], hot: [], arrows: [], cells: ANS, cellKind: "text", fields: ["prompt_ids", "completion_ids", "sampling_per_token_logps"], pad: true,
+      say: "32 行的题目和回答长短不一，要排成一样宽：题目往右靠，左边空位补上；回答往左靠，右边空位补上。另记一张 mask，1 表示这个位置是真的 token，0 表示补的。",
+      code: "prompt_ids = pad(prompt_ids, padding_value=pad_token_id, padding_side=\"left\")\ncompletion_ids = pad(completion_ids, padding_value=pad_token_id, padding_side=\"right\")" },
+
+    { on: ["dl", "vllm", "model"], hot: ["model"], arrows: ["a_model"], cells: ANS, cellKind: "text",
+      fields: ["prompt_ids", "completion_ids", "sampling_per_token_logps", "old_per_token_logps", "importance_sampling_ratio"],
+      say: "self.model（不算梯度）给这 32 个回答的每个 token 再打一遍分，得到 old_per_token_logps。vLLM 和训练模型算出来的会有一点差：每个 token 取 exp(训练模型的 − vLLM 的)，压到 0.1 到 3.0 之间，就是 importance_sampling_ratio。这一步比值在 0.6784 到 1.276 之间。",
+      code: "old_per_token_logps, _, _ = self._get_per_token_logps_and_entropies(self.model, ...)   # with torch.no_grad()\nvllm_importance_sampling_ratio = torch.clamp(torch.exp(old_per_token_logps - sampling_per_token_logps), min=0.1, max=3.0)" },
+
+    { on: ["dl", "vllm", "model", "reward"], hot: ["reward"], arrows: ["a_reward"], cells: R, cellKind: "num",
+      fields: ["prompt_ids", "completion_ids", "sampling_per_token_logps", "old_per_token_logps", "importance_sampling_ratio"],
+      gsub: ["8 个都答错", "1 个答对，7 个答错", "8 个都答错", "8 个都答错"],
+      say: "reward_countdown 逐个判分：算式只用题目给的数、每个恰好一次、结果等于目标数，给 1，否则给 0。这一步 32 个回答只有 1 个答对（日志 reward 0.03125，就是 1/32）。",
+      code: "rewards_per_func = self._calculate_rewards(inputs, prompts, completions, completion_ids_list)\nreward_countdown → [float(is_correct(c, n, t)) for c, n, t in zip(completions, nums, target)]" },
+
+    { on: ["dl", "vllm", "model", "reward"], hot: [], arrows: [], cells: A, cellKind: "adv",
+      fields: FIELDS,
+      gsub: ["全是 0：8 个分数一样，没有可学的", "答对的 +2.47，答错的各 −0.35", "全是 0", "全是 0"],
+      say: "算优势：每组各自算，(这个回答的分 − 这组 8 个的平均分) ÷ (这组的标准差 + 0.0001)。答对那组平均 0.125，答对的 +2.47、答错的各 −0.35；另外 3 组 8 个分数一样，优势全是 0（日志 frac_reward_zero_std 0.75，就是 4 组里 3 组）。",
+      code: "mean_grouped_rewards = torch.nanmean(rewards.view(-1, 8), dim=1)\nstd_rewards = nanstd(rewards.view(-1, 8), dim=1)\nadvantages = (rewards - mean_grouped_rewards) / (std_rewards + 1e-4)" },
+
+    { on: ["dl", "vllm", "model", "reward"], hot: [], arrows: ["a_buf"], cells: A, cellKind: "adv", fields: FIELDS, slots: "full", cur: 0,
+      gsub: ["", "", "", ""],
+      say: "_generate_and_score_completions 把装好的 out 交回 _prepare_inputs：32 行打乱顺序，切成 16 份、每份 2 行，存进 _buffered_inputs。第 1 次 training_step 拿第 1 份。",
+      code: "generation_batch = shuffle_sequence_dict(generation_batch)\nself._buffered_inputs = split_tensor_dict(generation_batch, self.args.steps_per_generation)   # 16 份\ninputs = self._buffered_inputs[self._step % self.args.steps_per_generation]" },
+
+    { on: ["model"], hot: ["model"], arrows: ["a_loss"], cells: A, cellKind: "adv", fields: FIELDS, slots: "full", cur: 0, grad: 1,
+      say: "算损失：self.model（这次算梯度）给这 2 行的每个 token 打分。参数还没改，新旧比值 exp(新 − 旧) 等于 1，每个 token 的损失就是 −优势 × importance_sampling_ratio；每行对 token 求平均，2 行再平均，最后除以 16。backward 把梯度加到参数上。",
+      code: "coef_1 = torch.exp(per_token_logps - old_per_token_logps)      # = 1\ncoef_2 = torch.clamp(coef_1, 1 - 0.2, 1 + 0.28)\nper_token_loss = -torch.min(coef_1 * advantages, coef_2 * advantages) * inputs[\"importance_sampling_ratio\"]\nloss = ((per_token_loss * mask).sum(-1) / mask.sum(-1)).mean() / 16" },
+
+    { on: ["model"], hot: ["model"], arrows: ["a_loss"], cells: A, cellKind: "adv", fields: FIELDS, slots: "full", cur: 15, grad: 16,
+      say: "第 2 到 16 次 training_step：self._step 不再能被 16 整除，不生成，直接拿下一份 2 行，照样算损失、加梯度。优势是 0 的行损失也是 0，不往梯度里加东西；这一步出力的只有答对那组的 8 行。",
+      code: "inputs = self._buffered_inputs[self._step % self.args.steps_per_generation]   # 第 2 … 16 份\nTrainer.training_step → self.compute_loss(...) → loss.backward()" },
+
+    { on: ["model", "opt"], hot: ["opt"], arrows: ["a_opt"], cells: A, cellKind: "adv", fields: FIELDS, slots: "full", cur: 15, grad: 16,
+      say: "攒满 16 次：先把梯度的总长度压到 1.0 以内（日志 grad_norm 1.766 是压之前的长度），FiniteGradients 查一遍没有 NaN、Inf，AdamW 按学习率 4.988e-06 改一次参数，然后清空梯度。global_step 变成 2，日志写下这一行指标。",
+      code: "grad_norm = self._clip_grad_norm(model)   # max_grad_norm=1.0，返回压之前的长度\nself.callback_handler.on_pre_optimizer_step(...)   # FiniteGradients\nself.optimizer.step(); self.lr_scheduler.step(); model.zero_grad()" },
+
+    { on: ["dl", "vllm", "model", "opt"], hot: ["vllm"], arrows: ["a_model_vllm"], cells: ASK, cellKind: "text", fields: [], slots: "empty",
+      gsub: ["换成第 3 步的 4 道新题", "", "", ""],
+      say: "第 3 步：self._step 是 32，又能被 16 整除，再生成；global_step（2）和 _last_loaded_step（1）又不一样，先把刚改过的参数拷进 vLLM。就这样一共跑 400 步。",
+      code: "if self._step % generate_every == 0: ... self._generate_and_score_completions(...)\nif self.state.global_step != self._last_loaded_step: self.vllm_generation.sync_weights()" }
+  ];
+
+  /* ---- 点击说明 ---- */
+  var NOTES = {
+    proc: { title: "训练进程", kind: "process", rows: [
+      ["是什么", "python train.py 跑起来的那一个进程。GRPOTrainer、vLLM、正在训练的模型、AdamW 都在这一个进程里，用同一张显卡（vllm_mode=\"colocate\"）。"],
+      ["谁创建、何时结束", "用户启动；400 步跑完退出。"] ] },
+    dl: { title: "RepeatSampler", kind: "memory", rows: [
+      ["是什么", "TRL 给训练数据换的取样器：每次取 4 道题（32 ÷ 8），每道连着抄 8 行；同一批 32 行要给 16 次 training_step 用，所以它把同一批重复交出 16 次（repeat_count=16），GRPOTrainer 只在第 1 次生成。"],
+      ["在哪里", { scope: "env", path: "trl/trainer/utils.py 的 RepeatSampler；GRPOTrainer._get_train_sampler 创建", hint: "训练机 Python 环境里装的 TRL 1.13.0。" }],
+      ["谁创建、何时删", "trainer.train() 建数据加载器时创建，整个训练一直在。"] ] },
+    vllm: { title: "vLLM 引擎", kind: "memory", rows: [
+      ["是什么", "专门快速生成文字的引擎，手里有一份模型参数的拷贝。和训练用同一张显卡，只占 25% 显存（vllm_gpu_memory_utilization=0.25）。每步生成前，如果 global_step 变了，先从 self.model 拷一次参数。"],
+      ["在哪里", { scope: "memory", path: "self.vllm_generation（训练进程内存，显卡上）" }],
+      ["谁创建、何时删", "GRPOTrainer 的 __init__ 创建；训练结束时没了。"] ],
+      sample: ["这一步生成的回答长度（日志真实记录，单位 token）：", "completions/mean_length: 163.0   completions/max_length: 539.0"] },
+    model: { title: "self.model", kind: "memory", rows: [
+      ["是什么", "正在训练的模型，Qwen2.5-1.5B 全部参数都训练。每步用它两次：生成后不算梯度打一遍分（old_per_token_logps）；每次 training_step 算梯度再打一遍分（per_token_logps）。"],
+      ["在哪里", { scope: "memory", path: "训练进程内存（显卡上）", hint: "从 /data/models/Qwen2.5-1.5B 载入。" }],
+      ["谁创建、何时删", "GRPOTrainer 的 __init__ 载入；每步被 AdamW 改一次参数；训练结束保存。"] ] },
+    reward: { title: "reward_countdown", kind: "function", rows: [
+      ["是什么", "src/countdown.py 里的函数，train.py 用 reward_funcs=[countdown.reward_countdown] 交给训练器。对每个回答调用 is_correct：取 <answer> 里的算式，只用题目给的数、每个恰好一次、算出来等于 target，给 1.0，否则 0.0。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/src/countdown.py" }],
+      ["谁调用", "GRPOTrainer._calculate_rewards，每步生成完调用一次，32 个回答一起判。"] ],
+      sample: ["这一步的分数（日志真实记录）：", "reward: 0.03125   reward_std: 0.1768   frac_reward_zero_std: 0.75"] },
+    opt: { title: "AdamW（self.optimizer）", kind: "memory", rows: [
+      ["是什么", "按梯度改参数的优化器（optim=\"adamw_torch_fused\"）。学习率从 5e-06 线性降到 0，第 2 步是 4.988e-06。每攒满 16 次 training_step 的梯度才改一次参数。"],
+      ["在哪里", { scope: "memory", path: "训练进程内存（显卡上）" }],
+      ["谁创建、何时删", "trainer.train() 开始时创建；存档时它的状态写进 checkpoint-<步数>/optimizer.pt。"] ],
+      sample: ["这一步改参数前后（日志真实记录）：", "grad_norm: 1.766   learning_rate: 4.988e-06   loss: 0.0002688"] },
+    out: { title: "out（本步 32 行）", kind: "memory", rows: [
+      ["是什么", "_generate_and_score_completions 返回的字典，每个键是一个张量，一行对应一个回答。图里中间那排键，随着这一步往下走一个个填上。"],
+      ["每个键", "prompt_ids：题目的 token 编号（左边补齐）。completion_ids：回答的 token 编号（右边补齐）。sampling_per_token_logps：vLLM 采样时每个 token 的 logp。old_per_token_logps：self.model 生成后打的分。importance_sampling_ratio：两者之差取 exp，压到 0.1–3.0。advantages：每行一个优势。"],
+      ["在哪里", { scope: "memory", path: "训练进程内存（显卡上）" }],
+      ["谁创建、何时删", "每步生成时新建，切成 16 份放进 _buffered_inputs，下一步生成时被新的替换。"] ] },
+    buf: { title: "_buffered_inputs", kind: "memory", rows: [
+      ["是什么", "out 打乱后切成的 16 份，每份 2 行（per_device_train_batch_size=2）。第 k 次 training_step 拿第 k 份；同一组的 8 行会被打散到不同份里。"],
+      ["在哪里", { scope: "memory", path: "self._buffered_inputs（训练进程内存）" }],
+      ["谁创建、何时删", "_prepare_inputs 在每步第 1 次 training_step 时写入，下一步生成时被替换。"] ] }
+  };
+  var KIND_PATH = {
+    process: ["M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2z", "M6.6 5.6 10.6 8l-4 2.4z"],
+    memory: ["M3 4h10v8H3z", "M5.5 4v8", "M10.5 4v8"],
+    function: ["M5.5 3.5 2.5 8l3 4.5", "M10.5 3.5 13.5 8l-3 4.5"]
+  };
+  var KIND_TEXT = { process: "进程（正在运行的程序）", memory: "内存里的对象", function: "函数（写在 .py 文件里的代码）" };
+  var KIND_SHORT = { process: "进程", memory: "内存里的对象", function: "函数" };
+
+  function icons(g, x, y, kind) {
+    var k = mk("g", { "class": "kind", transform: "translate(" + (x - 50) + "," + (y - 8) + ")" }, g);
+    mk("title", {}, k, KIND_SHORT[kind]);
+    KIND_PATH[kind].forEach(function (d) { mk("path", { d: d }, k); });
+    var icon = mk("g", { "class": "info" }, g);
+    mk("circle", { cx: x - 18, cy: y, r: 9 }, icon);
+    mk("text", { x: x - 18, y: y + 4, "text-anchor": "middle" }, icon, "i");
+  }
+  function clickable(g, id) {
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button");
+    g.addEventListener("click", function () { choose(id); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(id); } });
+    if (selected === id) g.classList.add("sel");
+  }
+  function fmt(v) { return v === 0 ? "0" : (v > 0 ? "+" : "−") + Math.abs(v).toFixed(2); }
+
+  function draw(s) {
+    var root = $("draw"); root.textContent = "";
+    // 进程的外框
+    var pg = mk("g", { id: P + "box_proc", "class": "node clickable on proc" }, root);
+    mk("rect", { "class": "box procframe", x: 6, y: 6, width: 988, height: 548, rx: 14 }, pg);
+    mk("text", { "class": "colhead", x: 22, y: 30 }, pg, "训练进程（python train.py）：下面的东西都在这一个进程里、同一张显卡上");
+    icons(pg, 994, 24, "process");
+    clickable(pg, "proc");
+    // 左边部件
+    PARTS.forEach(function (p) {
+      var y = PY[p[0]];
+      var g = mk("g", { id: P + "box_" + p[0], "class": "node clickable" + (s.on.indexOf(p[0]) >= 0 ? " on" : "") + (s.hot.indexOf(p[0]) >= 0 ? " hot" : "") }, root);
+      mk("rect", { "class": "box", x: LX, y: y, width: LW, height: LH, rx: 10 }, g);
+      mk("text", { "class": "title", x: LX + 14, y: y + 28 }, g, p[2]);
+      mk("text", { "class": "sub", x: LX + 14, y: y + 52 }, g, p[3]);
+      icons(g, LX + LW, y + 22, p[1]);
+      clickable(g, p[0]);
+    });
+    // 中间 out
+    var og = mk("g", { id: P + "box_out", "class": "node clickable on" }, root);
+    mk("rect", { "class": "box zonebox", x: OX, y: 50, width: OW, height: 412, rx: 12 }, og);
+    mk("text", { "class": "title", x: OX + 14, y: 74 }, og, s.cellKind === "text" && !s.fields.length ? "本步 32 行：4 道题 × 8 个回答" : "out：本步 32 行");
+    icons(og, OX + OW, 68, "memory");
+    clickable(og, "out");
+    var fx = OX + 14, fy = 90;
+    FIELDS.forEach(function (f) {
+      var w = f.length * 6.6 + 14;
+      if (fx + w > OX + OW - 10) { fx = OX + 14; fy += 26; }
+      var on = s.fields.indexOf(f) >= 0;
+      var cg = mk("g", { "class": "chip" + (on ? " found" : " off") }, root);
+      mk("rect", { x: fx, y: fy, width: w, height: 20, rx: 5 }, cg);
+      mk("text", { x: fx + 7, y: fy + 14, "class": "chiptext" }, cg, f);
+      fx += w + 6;
+    });
+    if (s.pad) {
+      // 补齐：画 8 行，每行一样宽；左段是题目（往右靠），右段是回答（往左靠），灰色是补上的位置
+      var PL = [58, 70, 50, 66, 74, 54, 62, 70], CL = [150, 60, 238, 96, 40, 182, 120, 72];
+      var sx0 = OX + 20, pw = 120, cw = 270;
+      mk("text", { "class": "sub", x: sx0 + pw - 4, y: GY0 - 2, "text-anchor": "end" }, root, "题目：往右靠");
+      mk("text", { "class": "sub", x: sx0 + pw + 8, y: GY0 - 2 }, root, "回答：往左靠");
+      for (var r = 0; r < 8; r++) {
+        var ry = GY0 + 10 + r * 34;
+        mk("rect", { "class": "padcell", x: sx0, y: ry, width: pw, height: 24, rx: 3 }, root);
+        mk("rect", { "class": "realq", x: sx0 + pw - PL[r], y: ry, width: PL[r], height: 24, rx: 3 }, root);
+        mk("rect", { "class": "padcell", x: sx0 + pw + 4, y: ry, width: cw, height: 24, rx: 3 }, root);
+        mk("rect", { "class": "reala", x: sx0 + pw + 4, y: ry, width: CL[r], height: 24, rx: 3 }, root);
+      }
+      mk("text", { "class": "sub", x: sx0, y: GY0 + 10 + 8 * 34 + 14 }, root, "灰色是补上的位置（mask 里记 0）；这里只画 8 行，32 行都一样");
+    } else {
+    for (var g = 0; g < 4; g++) {
+        var y = GY0 + g * (GH + 6);
+        mk("text", { "class": "glabel", x: OX + 14, y: y + 22 }, root, "第 " + g + " 组");
+        for (var c = 0; c < 8; c++) {
+          var v = s.cells[g][c];
+          var cls = "cell";
+          if (s.cellKind === "num") cls += v === 1 ? " pos" : "";
+          if (s.cellKind === "adv") cls += v > 0 ? " pos" : v < 0 ? " neg" : "";
+          if (s.cellKind === "text") cls += " txt";
+          var cg2 = mk("g", { "class": cls }, root);
+          var cx = OX + 70 + c * 45, cy = y + 6;
+          if (s.pad && s.cellKind === "text") {
+              var lp = [6, 2, 10, 4, 0, 8, 3, 5][(c + g * 3) % 8], rp = [14, 2, 20, 8, 0, 16, 6, 11][(c * 5 + g) % 8];
+            mk("rect", { x: cx, y: cy, width: 41, height: 40, rx: 4, "class": "padbg" }, cg2);
+            mk("rect", { x: cx + 3, y: cy + 3 + lp * 0.6, width: 35, height: 14 - lp * 0.6, rx: 2, "class": "realq" }, cg2);
+            mk("rect", { x: cx + 3, y: cy + 21, width: 35, height: 16 - rp * 0.6, rx: 2, "class": "reala" }, cg2);
+          } else {
+            mk("rect", { x: cx, y: cy, width: 41, height: 40, rx: 5 }, cg2);
+            mk("text", { x: cx + 20.5, y: cy + 25, "text-anchor": "middle" }, cg2, s.cellKind === "adv" ? fmt(v) : String(v));
+          }
+        }
+        if (s.gsub && s.gsub[g]) mk("text", { "class": "sub", x: OX + 70, y: y + 62 }, root, s.gsub[g]);
+      }
+      if (s.pad) {
+        mk("text", { "class": "sub", x: OX + 70, y: GY0 + 4 * (GH + 6) + 4 }, root, "每格上半是题目（底部对齐），下半是回答（顶部对齐），灰色是补的位置");
+      }
+    }
+    // 右边 _buffered_inputs
+    var bg = mk("g", { id: P + "box_buf", "class": "node clickable" + (s.slots ? " on" : "") }, root);
+    mk("rect", { "class": "box zonebox", x: BX, y: 50, width: BW, height: 412, rx: 12 }, bg);
+    mk("text", { "class": "title", x: BX + 14, y: 74 }, bg, "_buffered_inputs");
+    mk("text", { "class": "sub", x: BX + 14, y: 94 }, bg, "16 份，每份 2 行");
+    icons(bg, BX + BW, 68, "memory");
+    clickable(bg, "buf");
+    for (var k = 0; k < 16; k++) {
+      var col = k % 2, row = Math.floor(k / 2);
+      var sx = BX + 14 + col * 94, sy = 108 + row * 42;
+      var cls2 = "slot" + (s.slots === "full" ? " full" : "") + (s.cur !== undefined && (k === s.cur || (s.cur === 15 && k <= 15 && s.grad === 16 && k < 16 && false)) ? " cur" : "") + (s.grad && k < s.grad ? " used" : "");
+      var sg = mk("g", { "class": cls2 }, root);
+      mk("rect", { x: sx, y: sy, width: 86, height: 34, rx: 6 }, sg);
+      mk("text", { x: sx + 43, y: sy + 22, "text-anchor": "middle" }, sg, "第 " + (k + 1) + " 份");
+    }
+    // 梯度条
+    mk("text", { "class": "colhead", x: OX, y: 492 }, root, "梯度：已攒 " + (s.grad || 0) + " / 16 次");
+    mk("rect", { "class": "gradbg", x: OX, y: 500, width: OW + BW + 30, height: 14, rx: 7 }, root);
+    if (s.grad) mk("rect", { "class": "gradfill", x: OX, y: 500, width: (OW + BW + 30) * s.grad / 16, height: 14, rx: 7 }, root);
+    // 箭头
+    var A2 = {
+      a_dl:        "M" + (LX + LW + 2) + " " + (PY.dl + 36) + " H" + (OX - 4),
+      a_vllm:      "M" + (LX + LW + 2) + " " + (PY.vllm + 36) + " H" + (OX - 4),
+      a_model:     "M" + (LX + LW + 2) + " " + (PY.model + 36) + " H" + (OX - 4),
+      a_reward:    "M" + (LX + LW + 2) + " " + (PY.reward + 36) + " H" + (OX - 4),
+      a_model_vllm:"M" + (LX + 120) + " " + (PY.model - 2) + " V" + (PY.vllm + LH + 4),
+      a_buf:       "M" + (OX + OW + 2) + " 260 H" + (BX - 4),
+      a_loss:      "M" + (BX + 57) + " " + (108 + 2) + " V" + (PY.model + 54) + " H" + (LX + LW + 4),
+      a_opt:       "M" + (LX + 120) + " " + (PY.model + LH + 2) + " V" + (PY.opt - 4)
+    };
+    if (s.arrows.indexOf("a_loss") >= 0) {
+      var cy2 = 108 + Math.floor((s.cur || 0) / 2) * 42 + 17, cx2 = BX + 14 + ((s.cur || 0) % 2) * 94;
+      A2.a_loss = "M" + (cx2 - 2) + " " + cy2 + " H" + (BX - 14) + " V" + 474 + " H" + 285 + " V" + (PY.model + 36) + " H" + (LX + LW + 4);
+    }
+    s.arrows.forEach(function (id) { mk("path", { "class": "link", d: A2[id], "marker-end": "url(#" + P + "head)" }, root); });
+  }
+
+  /* ---- 说明 ---- */
+  var selected = null;
+  var SCOPE_TEXT = { project: "项目文件夹内", env: "训练机 Python 环境里", memory: "训练进程内存" };
+  function renderNote(id) {
+    var n = NOTES[id];
+    $("noteTitle").textContent = n.title;
+    var rowsAll = [["类型", KIND_TEXT[n.kind]]].concat(n.rows);
+    if (n.sample) rowsAll.push(["长什么样", { cap: n.sample[0], pre: n.sample[1] }]);
+    var dl = $("noteRows"); dl.textContent = "";
+    rowsAll.forEach(function (row) {
+      var dt = document.createElement("dt"); dt.textContent = row[0];
+      var dd = document.createElement("dd"); var v = row[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else if (v.pre !== undefined) {
+        var pc = document.createElement("p"); pc.className = "sample-cap"; pc.textContent = v.cap; dd.appendChild(pc);
+        var pre = document.createElement("pre"); pre.className = "sample"; pre.textContent = v.pre; dd.appendChild(pre);
+      } else {
+        var p1 = document.createElement("p");
+        var chip = document.createElement("span"); chip.className = "scope " + v.scope; chip.textContent = SCOPE_TEXT[v.scope];
+        var code = document.createElement("span"); code.className = "path"; code.textContent = v.path;
+        p1.appendChild(chip); p1.appendChild(code); dd.appendChild(p1);
+        if (v.hint) { var p2 = document.createElement("p"); p2.className = "hint"; p2.textContent = v.hint; dd.appendChild(p2); }
+      }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    document.querySelectorAll("#" + P + "diagram .node").forEach(function (g) { g.classList.toggle("sel", g.id === P + "box_" + selected); });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+
+  function buildLegend() {
+    var box = $("legend");
+    ["process", "memory", "function"].forEach(function (k) {
+      var s = document.createElement("span"); s.className = "k-" + k;
+      var svg = document.createElementNS(SVGNS, "svg"); svg.setAttribute("viewBox", "0 0 16 16");
+      KIND_PATH[k].forEach(function (d) { mk("path", { d: d }, svg); });
+      s.appendChild(svg); s.appendChild(document.createTextNode(KIND_SHORT[k])); box.appendChild(s);
+    });
+    [["pos", "优势为正 / 答对"], ["neg", "优势为负"]].forEach(function (p) {
+      var s = document.createElement("span");
+      var i = document.createElement("i"); i.className = "sw " + p[0];
+      s.appendChild(i); s.appendChild(document.createTextNode(p[1])); box.appendChild(s);
+    });
+  }
+
+  /* ---- 翻页 ---- */
+  var cur = 0;
+  function show(i) {
+    cur = Math.max(0, Math.min(STEPS.length - 1, i));
+    var s = STEPS[cur];
+    draw(s);
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + STEPS.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === STEPS.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash("grpo", cur + 1);
+  }
+  STEPS.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 页");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+
+  buildLegend();
+  show(0);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { show(cur); });
+
+  window.__v = window.__v || {};
+  window.__v.grpo = { show: show, cur: function () { return cur; } };
+})();
+(function () {
+  var P = "c-";
+
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var $ = function (id) { return document.getElementById(P + id); };
+  function mk(tag, attrs, parent, text) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+
+  /* ---- 类：写在哪个文件、写了哪些方法（只列这一页讲到的三个方法） ---- */
+  var CLS = {
+    POPOTrainer:            { file: "train.py", methods: [] },
+    OPDTrainer:             { file: "train.py", methods: [] },
+    GroupReplayGRPOTrainer: { file: "src/POPO.py", methods: ["_install_popo", "_generate_and_score_completions"] },
+    OPDGRPOTrainer:         { file: "src/OPD.py", methods: ["_install_opd", "_generate_and_score_completions"] },
+    FiniteGRPOTrainer:      { file: "train.py", methods: ["compute_loss"] },
+    GRPOTrainer:            { file: "TRL 写的", methods: ["_generate_and_score_completions", "compute_loss"] }
+  };
+  var POPO_ROWS = ["POPOTrainer", "GroupReplayGRPOTrainer", "FiniteGRPOTrainer", "GRPOTrainer"];
+  var OPD_ROWS  = ["OPDTrainer", "OPDGRPOTrainer", "FiniteGRPOTrainer", "GRPOTrainer"];
+
+  var G = "_generate_and_score_completions";
+  var STEPS = [
+    { rows: POPO_ROWS, on: ["GRPOTrainer"], hot: ["GRPOTrainer"], chips: [["GRPOTrainer", G]],
+      say: "先讲类。类是一段写好的代码，里面有几个方法，方法就是有名字的一段操作。GRPOTrainer 是 TRL 写的类，它有一个方法叫 _generate_and_score_completions：让模型写回答、打分。",
+      code: "class GRPOTrainer(_BaseTrainer):          # TRL 写的，trl/trainer/grpo_trainer.py\n    def _generate_and_score_completions(self, inputs): ...\n    def compute_loss(self, model, inputs, ...): ..." },
+
+    { rows: POPO_ROWS, on: ["FiniteGRPOTrainer", "GRPOTrainer"], hot: ["FiniteGRPOTrainer"], chips: [["FiniteGRPOTrainer", "compute_loss"]], below: ["FiniteGRPOTrainer", "GRPOTrainer"],
+      say: "再讲继承。class FiniteGRPOTrainer(GRPOTrainer)：括号里写 GRPOTrainer，意思是 FiniteGRPOTrainer 继承 GRPOTrainer，把它排在 GRPOTrainer 上面。FiniteGRPOTrainer 自己只写了 compute_loss 一个方法，其余的都没写。",
+      code: "class FiniteGRPOTrainer(GRPOTrainer):     # train.py\n    def compute_loss(self, *args, **kwargs): ..." },
+
+    { rows: POPO_ROWS, on: ["FiniteGRPOTrainer", "GRPOTrainer"], hot: ["GRPOTrainer"], below: ["FiniteGRPOTrainer", "GRPOTrainer"],
+      obj: { cls: "FiniteGRPOTrainer", attrs: [] }, look: { method: G, from: "FiniteGRPOTrainer", to: "GRPOTrainer" }, miss: ["FiniteGRPOTrainer"], chips: [["GRPOTrainer", G]],
+      say: "用类造出对象：trainer = FiniteGRPOTrainer(...)。让 trainer 执行 _generate_and_score_completions 时，Python 从它的类开始往下找：FiniteGRPOTrainer 没写这个方法，往下一层，GRPOTrainer 写了，就用 GRPOTrainer 的。这就是继承的用处：没写的方法，用下面那层的。",
+      code: "trainer = trainer_cls(...)               # 不加 --popo、--opd 时，train.py 里 trainer_cls 是 FiniteGRPOTrainer\ntrainer._generate_and_score_completions(...)   # → 找到 GRPOTrainer 的" },
+
+    { rows: POPO_ROWS, on: ["FiniteGRPOTrainer", "GRPOTrainer"], hot: ["FiniteGRPOTrainer"], below: ["FiniteGRPOTrainer", "GRPOTrainer"],
+      obj: { cls: "FiniteGRPOTrainer", attrs: [] }, look: { method: "compute_loss", from: "FiniteGRPOTrainer", to: "FiniteGRPOTrainer" }, chips: [["FiniteGRPOTrainer", "compute_loss"]],
+      say: "如果上面那层也写了同名方法，就用上面那层的。compute_loss 两层都写了，从上往下找，先在 FiniteGRPOTrainer 找到，就用它的，不再往下找。",
+      code: "trainer.compute_loss(...)   # FiniteGRPOTrainer 写了 compute_loss → 用它的，GRPOTrainer 的不会自动执行" },
+
+    { rows: POPO_ROWS, on: ["FiniteGRPOTrainer", "GRPOTrainer"], hot: ["GRPOTrainer"], below: ["FiniteGRPOTrainer", "GRPOTrainer"],
+      obj: { cls: "FiniteGRPOTrainer", attrs: [] }, chips: [["FiniteGRPOTrainer", "compute_loss"], ["GRPOTrainer", "compute_loss"]],
+      sup: { from: "FiniteGRPOTrainer", to: "GRPOTrainer", method: "compute_loss" },
+      pills: [["GRPOTrainer", "算出损失 loss，交回上面"], ["FiniteGRPOTrainer", "检查 loss 有没有 NaN、Inf"]],
+      say: "那下面那层的还用不用？用 super()。FiniteGRPOTrainer 的 compute_loss 第一行写 super().compute_loss(...)，意思是从下一层接着找同名方法、执行它、拿回结果：GRPOTrainer 算出损失交回来，FiniteGRPOTrainer 再检查损失里有没有 NaN 或 Inf。",
+      code: "def compute_loss(self, *args, **kwargs):          # FiniteGRPOTrainer，train.py\n    loss = super().compute_loss(*args, **kwargs)  # → 执行 GRPOTrainer 的 compute_loss\n    if not torch.isfinite(loss).all(): raise FloatingPointError(\"non-finite training loss\")" },
+
+    { rows: POPO_ROWS, on: POPO_ROWS, hot: ["POPOTrainer", "GroupReplayGRPOTrainer"], below: ["POPOTrainer", "GroupReplayGRPOTrainer", "FiniteGRPOTrainer", "GRPOTrainer"],
+      chips: [["GroupReplayGRPOTrainer", G], ["GRPOTrainer", G]], showMro: true,
+      say: "括号里可以写两个类。class POPOTrainer(GroupReplayGRPOTrainer, FiniteGRPOTrainer)：Python 把它们从上往下排成一张名单，括号里先写的排上面，存在 POPOTrainer.__mro__ 里。找方法就按这张名单从上往下找。注意：GroupReplayGRPOTrainer 和 GRPOTrainer 都写了 _generate_and_score_completions，GroupReplayGRPOTrainer 排在上面。",
+      code: "class POPOTrainer(GroupReplayGRPOTrainer, FiniteGRPOTrainer):   # train.py\nPOPOTrainer.__mro__  # → POPOTrainer, GroupReplayGRPOTrainer, FiniteGRPOTrainer, GRPOTrainer, _BaseTrainer, Trainer, object" },
+
+    { rows: POPO_ROWS, on: POPO_ROWS, hot: ["POPOTrainer"], below: POPO_ROWS, obj: { cls: "POPOTrainer", attrs: [] },
+      say: "现在进入项目。命令行加了 --popo，train.py 就用 POPOTrainer 造出 trainer。造对象时 TRL 照常载入模型、准备生成回答用的 vLLM。",
+      code: "trainer_cls = (POPOTrainer if a.popo else OPDTrainer if a.opd else FiniteGRPOTrainer)\ntrainer = trainer_cls(model=a.model, reward_funcs=reward_funcs, args=cfg, train_dataset=ds, ...)" },
+
+    { rows: POPO_ROWS, on: POPO_ROWS, hot: ["GroupReplayGRPOTrainer"], below: POPO_ROWS, obj: { cls: "POPOTrainer", attrs: ["replay_buffer：空的回放缓冲区"] },
+      look: { method: "_install_popo", from: "POPOTrainer", to: "GroupReplayGRPOTrainer" }, miss: ["POPOTrainer"], chips: [["GroupReplayGRPOTrainer", "_install_popo"]],
+      say: "TRL 造对象时不知道 POPO 要用缓冲区，所以造好以后，train.py 再让 trainer 执行 _install_popo。按名单找：POPOTrainer 没写，GroupReplayGRPOTrainer 写了。它给 trainer 放上一个空的回放缓冲区 replay_buffer。",
+      code: "if a.popo:\n    trainer._install_popo(capacity=a.prompts_per_rollout, score_batch_size=1, rho_clip=a.rho_clip)" },
+
+    { rows: POPO_ROWS, on: POPO_ROWS, hot: ["GroupReplayGRPOTrainer"], below: POPO_ROWS, obj: { cls: "POPOTrainer", attrs: ["replay_buffer：空的回放缓冲区"] },
+      look: { method: G, from: "POPOTrainer", to: "GroupReplayGRPOTrainer" }, miss: ["POPOTrainer"], chips: [["GroupReplayGRPOTrainer", G]],
+      say: "开始训练。TRL 的代码每一步写的是 self._generate_and_score_completions(...)，self 就是这个 trainer。按名单找：POPOTrainer 没写，GroupReplayGRPOTrainer 写了，于是执行的是 POPO 写的那一个。TRL 的代码一行没改。",
+      code: "generation_batch = self._generate_and_score_completions(generation_batch)   # TRL 的 GRPOTrainer._prepare_inputs 里这一行" },
+
+    { rows: POPO_ROWS, on: POPO_ROWS, hot: ["GRPOTrainer"], below: POPO_ROWS, obj: { cls: "POPOTrainer", attrs: ["replay_buffer：空的回放缓冲区"] },
+      sup: { from: "GroupReplayGRPOTrainer", to: "GRPOTrainer", method: G }, miss: ["FiniteGRPOTrainer"], chips: [["GroupReplayGRPOTrainer", G], ["GRPOTrainer", G]],
+      pills: [["GRPOTrainer", "写 32 个回答、打分 → out"]],
+      say: "POPO 这个方法的第一行是 super()._generate_and_score_completions(inputs)：从名单下一层接着找。FiniteGRPOTrainer 没写，再往下，GRPOTrainer 写了。TRL 照常让模型给 4 道题各写 8 个回答、打分、算优势，把结果 out 交回给 POPO。",
+      code: "out = super()._generate_and_score_completions(inputs)   # GroupReplayGRPOTrainer._generate_and_score_completions 的第一行" },
+
+    { rows: POPO_ROWS, on: POPO_ROWS, hot: ["GroupReplayGRPOTrainer"], below: POPO_ROWS, obj: { cls: "POPOTrainer", attrs: ["replay_buffer：里面存着活组"] },
+      chips: [["GroupReplayGRPOTrainer", G]], pills: [["GroupReplayGRPOTrainer", "在 out 里换掉死组 → return out"]],
+      say: "回到 POPO：在 out 里找出死组，用缓冲区里的历史组换掉，再把本步的活组存进缓冲区，最后 return out。TRL 拿到的就是换过死组的 out，接着用它算损失、更新模型。",
+      code: "picks = self.replay_buffer.sample_latest(len(dead_groups), exclude_prompts)\nif picks: self._replace_dead_groups(out, dead_groups, picks, g)\nself.replay_buffer.add_many(live_records)\nreturn out" },
+
+    { rows: OPD_ROWS, on: OPD_ROWS, hot: ["OPDGRPOTrainer"], below: OPD_ROWS, obj: { cls: "OPDTrainer", attrs: ["opd_teacher：载入的教师模型"] },
+      sup: { from: "OPDGRPOTrainer", to: "GRPOTrainer", method: G }, chips: [["OPDGRPOTrainer", G], ["GRPOTrainer", G]],
+      pills: [["GRPOTrainer", "学生写回答 → out"], ["OPDGRPOTrainer", "教师给每个 token 打分，改写优势"]],
+      say: "OPD 一模一样，只是名单第二层换成 OPDGRPOTrainer。加 --opd 时用 OPDTrainer 造 trainer，_install_opd 载入教师模型。每一步 TRL 叫 _generate_and_score_completions，先找到 OPD 的；它 super() 让 TRL 照常让学生写回答，拿回来再让教师给每个 token 打分，改写优势。",
+      code: "class OPDTrainer(OPDGRPOTrainer, FiniteGRPOTrainer):   # train.py\n    pass\nout = super()._generate_and_score_completions(inputs)   # OPDGRPOTrainer._generate_and_score_completions 的第一行" }
+  ];
+
+  /* ---- 点击说明 ---- */
+  var PROJ = "项目文件夹 = 你 clone 下来的 POPO-OPD-Relay 那个目录。";
+  var ENV = "训练机上 Python 环境里装好的 TRL 1.13.0，不在项目文件夹里。";
+  var NOTES = {
+    GRPOTrainer: { rows: [
+      ["是什么", "TRL 写的 GRPO 训练器类。_generate_and_score_completions 让模型写回答、判分、算优势；compute_loss 算损失。它下面还有 _BaseTrainer（TRL）和 Trainer（transformers），这一页用不到。"],
+      ["在哪里", { scope: "env", path: "trl/trainer/grpo_trainer.py", hint: ENV }],
+      ["谁写的", "TRL 写的，本项目一行没改。"] ] },
+    FiniteGRPOTrainer: { rows: [
+      ["是什么", "train.py 里的类，继承 GRPOTrainer，只写了 compute_loss：先 super() 让 GRPOTrainer 算损失，再检查有没有 NaN 或 Inf。不加 --popo、--opd 时用它造 trainer。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/train.py", hint: PROJ }],
+      ["谁写的", "本项目写的。"] ] },
+    GroupReplayGRPOTrainer: { rows: [
+      ["是什么", "src/POPO.py 里 POPO 的训练器部件：class GroupReplayGRPOTrainer: 后面没有括号，单独造不出能训练的对象，只能放进 POPOTrainer 的括号里用。_install_popo 放上缓冲区；_generate_and_score_completions 先 super() 让 TRL 生成，再换死组。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/src/POPO.py" }],
+      ["谁写的", "本项目写的。"] ] },
+    OPDGRPOTrainer: { rows: [
+      ["是什么", "src/OPD.py 里 OPD 的训练器部件，也是 class OPDGRPOTrainer: 后面没有括号。_install_opd 载入教师模型；_generate_and_score_completions 先 super() 让 TRL 生成，再让教师给每个 token 打分。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/src/OPD.py" }],
+      ["谁写的", "本项目写的。"] ] },
+    POPOTrainer: { rows: [
+      ["是什么", "train.py 里 POPO 用的类，括号里先写 GroupReplayGRPOTrainer、再写 FiniteGRPOTrainer。这一页讲的三个方法它都没写；它自己写的是存档、续跑用的 _save_checkpoint 和 _load_from_checkpoint。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/train.py", hint: PROJ }],
+      ["谁写的", "本项目写的。"] ] },
+    OPDTrainer: { rows: [
+      ["是什么", "train.py 里 OPD 用的类，括号里先写 OPDGRPOTrainer、再写 FiniteGRPOTrainer，类里只有 pass，一个方法也没写。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/train.py", hint: PROJ }],
+      ["谁写的", "本项目写的。"] ] },
+    trainer: { title: "trainer", rows: [
+      ["是什么", "用类造出来的对象。train.py 里 trainer = trainer_cls(...)；TRL 代码里的 self 指的就是它。"],
+      ["在哪里", { scope: "memory", path: "训练进程内存" }],
+      ["谁创建、何时删", "train.py 创建；训练跑完、进程退出时没了。"] ] }
+  };
+  var KIND_PATH = { cls: ["M5.5 3.5 2.5 8l3 4.5", "M10.5 3.5 13.5 8l-3 4.5"], memory: ["M3 4h10v8H3z", "M5.5 4v8", "M10.5 4v8"] };
+  var KIND_TEXT = { cls: "类（写在 .py 文件里的代码）", memory: "内存里的对象" };
+  var KIND_SHORT = { cls: "类", memory: "对象（用类造出来的，在内存里）" };
+
+  /* ---- 画 ---- */
+  var X0 = 130, W = 460, BH = 80, GAP = 20, Y0 = 50;
+  var RX = 640, RW = 240;
+  function addIcons(g, x, y, kind) {
+    var k = mk("g", { "class": "kind", transform: "translate(" + (x - 50) + "," + (y - 8) + ")" }, g);
+    mk("title", {}, k, KIND_SHORT[kind]);
+    KIND_PATH[kind].forEach(function (d) { mk("path", { d: d }, k); });
+    var icon = mk("g", { "class": "info" }, g);
+    mk("circle", { cx: x - 18, cy: y, r: 9 }, icon);
+    mk("text", { x: x - 18, y: y + 4, "text-anchor": "middle" }, icon, "i");
+  }
+  function clickable(g, id) {
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button");
+    g.addEventListener("click", function () { choose(id); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(id); } });
+  }
+
+  var POS = {};
+  function draw(s) {
+    var root = $("draw"); root.textContent = "";
+    POS = {};
+    var label = s.showMro || s.rows === OPD_ROWS || s.on.length === 4 ? s.rows[0] + ".__mro__：找方法时从上往下" : "";
+    if (label) mk("text", { "class": "colhead", x: X0, y: 32 }, root, label);
+    // 类，从上往下
+    s.rows.forEach(function (name, i) {
+      var c = CLS[name], y = Y0 + i * (BH + GAP);
+      var on = s.on.indexOf(name) >= 0, hot = s.hot.indexOf(name) >= 0, miss = (s.miss || []).indexOf(name) >= 0;
+      var g = mk("g", { id: P + "box_" + name, "class": "node clickable" + (on ? " on" : "") + (hot ? " hot" : "") + (miss ? " miss" : "") + (selected === name ? " sel" : "") }, root);
+      mk("rect", { "class": "box", x: X0, y: y, width: W, height: BH, rx: 10 }, g);
+      mk("text", { "class": "title", x: X0 + 14, y: y + 26 }, g, name);
+      mk("text", { "class": "sub", x: X0 + 14 + name.length * 8.4 + 12, y: y + 26 }, g, c.file);
+      if (miss) mk("text", { "class": "misslabel", x: X0 + W - 64, y: y + 27, "text-anchor": "end" }, g, "没写");
+      addIcons(g, X0 + W, y + 22, "cls");
+      var x = X0 + 14, chipY = {};
+      if (!c.methods.length) mk("text", { "class": "sub", x: X0 + 14, y: y + 60 }, g, "这一页讲的方法它都没写");
+      c.methods.forEach(function (m) {
+        var w = m.length * 7.15 + 18;
+        var found = (s.chips || []).some(function (p) { return p[0] === name && p[1] === m; });
+        var cg = mk("g", { "class": "chip" + (found ? " found" : "") }, g);
+        mk("rect", { x: x, y: y + 44, width: w, height: 24, rx: 6 }, cg);
+        mk("text", { x: x + 9, y: y + 60 }, cg, m);
+        chipY[m] = [x, x + w, y + 56];
+        x += w + 10;
+      });
+      clickable(g, name);
+      POS[name] = { y: y, mid: y + BH / 2, chips: chipY };
+    });
+    // 每两层之间的继承线（下面的类 → 上面的类）
+    for (var i = 0; i + 1 < s.rows.length; i++) {
+      var a = s.rows[i], b = s.rows[i + 1];
+      var both = s.on.indexOf(a) >= 0 && s.on.indexOf(b) >= 0 && (s.below || []).indexOf(a) >= 0;
+      if (both) mk("line", { "class": "inherit", x1: X0 + 40, y1: POS[a].y + BH, x2: X0 + 40, y2: POS[b].y }, root);
+    }
+    // 找方法：左边一条从上往下的箭头
+    if (s.look) {
+      var f = POS[s.look.from], t = POS[s.look.to];
+      var ty = t.chips[s.look.method] ? t.chips[s.look.method][2] : t.mid;
+      mk("path", { "class": "link", d: "M100 " + (f.y + 10) + " V" + ty + " H" + (X0 - 4), "marker-end": "url(#" + P + "head)" }, root);
+      mk("text", { "class": "linklabel", x: 96, y: f.y + 4, "text-anchor": "end" }, root, "从上");
+      mk("text", { "class": "linklabel", x: 96, y: f.y + 20, "text-anchor": "end" }, root, "往下找");
+    }
+    // super()：右边一条橙色弧线
+    if (s.sup) {
+      var sa = POS[s.sup.from].chips[s.sup.method], sb = POS[s.sup.to].chips[s.sup.method];
+      var xr = X0 + W;
+      mk("path", { "class": "link warm", d: "M" + (xr + 2) + " " + sa[2] + " C" + (xr + 40) + " " + sa[2] + " " + (xr + 40) + " " + sb[2] + " " + (xr + 6) + " " + sb[2], "marker-end": "url(#" + P + "headw)" }, root);
+      mk("text", { "class": "linklabel warm", x: xr + 38, y: (sa[2] + sb[2]) / 2 + 4 }, root, "super()");
+    }
+    // 说明这一层做了什么的小标签
+    (s.pills || []).forEach(function (p) {
+      var pos = POS[p[0]];
+      var pg = mk("g", { "class": "packet show" }, root);
+      var px = RX, py = pos.mid;
+      var r = mk("rect", { x: px, y: py - 13, height: 26, rx: 13 }, pg);
+      var t = mk("text", { x: px + 12, y: py + 4 }, pg, p[1]);
+      r.setAttribute("width", t.getComputedTextLength() + 24);
+    });
+    // trainer 对象
+    var obj = s.obj;
+    var og = mk("g", { id: P + "box_trainer", "class": "node clickable" + (obj ? " on" : "") + (selected === "trainer" ? " sel" : "") }, root);
+    var oy = 10, oh = 70 + (obj && obj.attrs.length ? obj.attrs.length * 20 : 0);
+    mk("rect", { "class": "box", x: RX, y: oy, width: RW, height: oh, rx: 10 }, og);
+    mk("text", { "class": "title", x: RX + 14, y: oy + 26 }, og, "trainer");
+    mk("text", { "class": "sub", x: RX + 14, y: oy + 48 }, og, obj ? obj.cls + " 造出的对象" : "还没造出来");
+    (obj ? obj.attrs : []).forEach(function (l, i) { mk("text", { "class": "attr new", x: RX + 14, y: oy + 72 + i * 20 }, og, l); });
+    addIcons(og, RX + RW, oy + 22, "memory");
+    clickable(og, "trainer");
+  }
+
+  /* ---- 说明 ---- */
+  var selected = null;
+  var SCOPE_TEXT = { project: "项目文件夹内", env: "训练机 Python 环境里", memory: "训练进程内存" };
+  function renderNote(id) {
+    var n = NOTES[id];
+    $("noteTitle").textContent = n.title || id;
+    var rowsAll = [["类型", KIND_TEXT[id === "trainer" ? "memory" : "cls"]]].concat(n.rows);
+    var dl = $("noteRows"); dl.textContent = "";
+    rowsAll.forEach(function (row) {
+      var dt = document.createElement("dt"); dt.textContent = row[0];
+      var dd = document.createElement("dd"); var v = row[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else {
+        var p1 = document.createElement("p");
+        var chip = document.createElement("span"); chip.className = "scope " + v.scope; chip.textContent = SCOPE_TEXT[v.scope];
+        var code = document.createElement("span"); code.className = "path"; code.textContent = v.path;
+        p1.appendChild(chip); p1.appendChild(code); dd.appendChild(p1);
+        if (v.hint) { var p2 = document.createElement("p"); p2.className = "hint"; p2.textContent = v.hint; dd.appendChild(p2); }
+      }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    document.querySelectorAll("#" + P + "diagram .node").forEach(function (g) { g.classList.toggle("sel", g.id === P + "box_" + selected); });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+
+  function buildLegend() {
+    var box = $("legend");
+    ["cls", "memory"].forEach(function (k) {
+      var s = document.createElement("span");
+      var svg = document.createElementNS(SVGNS, "svg"); svg.setAttribute("viewBox", "0 0 16 16");
+      KIND_PATH[k].forEach(function (d) { mk("path", { d: d }, svg); });
+      s.appendChild(svg); s.appendChild(document.createTextNode(KIND_SHORT[k])); box.appendChild(s);
+    });
+    [["found", "这一页用到的方法"], ["miss", "找过、没写这个方法"]].forEach(function (p) {
+      var s = document.createElement("span");
+      var i = document.createElement("i"); i.className = "sw " + p[0];
+      s.appendChild(i); s.appendChild(document.createTextNode(p[1])); box.appendChild(s);
+    });
+  }
+
+  /* ---- 翻页 ---- */
+  var cur = 0;
+  function show(i) {
+    cur = Math.max(0, Math.min(STEPS.length - 1, i));
+    var s = STEPS[cur];
+    if (selected && selected !== "trainer" && s.rows.indexOf(selected) < 0) { selected = null; $("note").hidden = true; }
+    draw(s);
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + STEPS.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === STEPS.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash("trl", cur + 1);
+  }
+  STEPS.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 页");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+
+  buildLegend();
+  show(0);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { show(cur); });
+
+  window.__v = window.__v || {};
+  window.__v.trl = { show: show, cur: function () { return cur; } };
+})();
+(function () {
+  var P = "d-";
+
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var $ = function (id) { return document.getElementById(P + id); };
+
+  /* ---- 画 4 组和缓冲区的 4 个位置 ---- */
+  var OX = 300, OW = 440, BX = 770, BW = 210;
+  var GY = [112, 200, 288, 376];       // 每组那一排的 y
+  var SY = [108, 194, 280, 366];       // 缓冲区每个位置的 y
+  function mk(tag, attrs, parent) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+  (function draw() {
+    var root = $("cells");
+    for (var g = 0; g < 4; g++) {
+      var grp = mk("g", { id: P + "g" + g, "class": "node clickable" }, root);
+      mk("rect", { "class": "box grow", x: OX + 6, y: GY[g] - 6, width: OW - 12, height: 80, rx: 10 }, grp);
+      var t = mk("text", { "class": "glabel", x: OX + 14, y: GY[g] + 22 }, grp); t.textContent = "第 " + g + " 组";
+      var s = mk("text", { "class": "sub", id: P + "gs" + g, x: OX + 70, y: GY[g] + 62 }, grp);
+      for (var c = 0; c < 8; c++) {
+        var cell = mk("g", { "class": "cell", id: P + "c" + g + "_" + c }, grp);
+        var cx = OX + 70 + c * 45;
+        mk("rect", { x: cx, y: GY[g] + 6, width: 41, height: 40, rx: 5 }, cell);
+        var ct = mk("text", { x: cx + 20.5, y: GY[g] + 31, "text-anchor": "middle" }, cell); ct.textContent = "0";
+      }
+    }
+    for (var b = 0; b < 4; b++) {
+      var slot = mk("g", { id: P + "b" + b, "class": "node clickable" }, root);
+      slot.classList.add("bslotg");
+      mk("rect", { "class": "box bslot", x: BX + 14, y: SY[b], width: BW - 28, height: 76, rx: 8 }, slot);
+      var bt = mk("text", { "class": "title", id: P + "bt" + b, x: BX + 28, y: SY[b] + 26 }, slot);
+      var bs = mk("text", { "class": "sub", id: P + "bs" + b, x: BX + 28, y: SY[b] + 46 }, slot);
+      var bq = mk("text", { "class": "sub", id: P + "bq" + b, x: BX + 28, y: SY[b] + 64 }, slot);
+    }
+  })();
+
+  /* ---- 每一步的状态 ---- */
+  var Z = [0, 0, 0, 0, 0, 0, 0, 0];
+  var L = [-0.35, -0.35, -0.35, 2.47, -0.35, -0.35, -0.35, -0.35];   // 8 个回答里 1 个答对
+  var NONE = null;                                                  // 还没生成
+  var REC = ["GroupRecord", "第 2 步第 1 组：题目、8 份回答"];
+  var EMPTY = ["空", ""];
+
+  var STEPS = [
+    { badge: "第 1 步", on: ["trainer", "g0", "g1", "g2", "g3"], hot: ["g0", "g1", "g2", "g3"],
+      groups: [Z, Z, Z, Z], gsub: ["8 个都答错", "8 个都答错", "8 个都答错", "8 个都答错"],
+      buf: [EMPTY, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["", ""], excl: ["", ""], live: ["", ""], picks: ["", ""] },
+      say: "第 1 步：TRL 给 4 道题各写 8 个回答，一共 32 行；全部答错，奖励全是 0，所以 32 格的优势全是 0。",
+      code: "out = super()._generate_and_score_completions(inputs)" },
+
+    { badge: "第 1 步", on: ["trainer", "g0", "g1", "g2", "g3", "v_dead", "v_excl", "v_live"], hot: ["v_dead", "v_excl"],
+      groups: [Z, Z, Z, Z], gsub: ["死组", "死组", "死组", "死组"],
+      buf: [EMPTY, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["[0, 1, 2, 3]", "4 个死组的编号"], excl: ["{4 道题}", "第 0–3 组的题目"], live: ["[]", "没有活组"], picks: ["", ""] },
+      say: "逐组看 8 个优势是不是都和第一个相同：4 组都是，所以 4 组全是死组，记下它们的编号和题目。",
+      code: "if torch.equal(group_adv, group_adv[:1].expand_as(group_adv)):\n    dead_groups.append(group_idx); exclude_prompts.add(prompt); continue" },
+
+    { badge: "第 1 步", on: ["trainer", "g0", "g1", "g2", "g3", "v_dead", "v_excl", "v_live", "v_picks"], hot: ["v_picks", "b0", "b1", "b2", "b3"],
+      onAlso: ["b0", "b1", "b2", "b3"],
+      groups: [Z, Z, Z, Z], gsub: ["死组，原样留着", "死组，原样留着", "死组，原样留着", "死组，原样留着"],
+      buf: [EMPTY, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["[0, 1, 2, 3]", ""], excl: ["{4 道题}", ""], live: ["[]", ""], picks: ["[]", "缓冲区是空的"] },
+      say: "去缓冲区要 4 组历史组，缓冲区是空的，什么也取不到，4 个死组原样留着；这一步日志里 loss 是 0，grad_norm 也是 0。",
+      code: "picks = self.replay_buffer.sample_latest(len(dead_groups), exclude_prompts)   # → []\nself.replay_buffer.add_many(live_records)   # live_records 是 []，什么也不存" },
+
+    { badge: "第 2 步", on: ["trainer", "g0", "g1", "g2", "g3"], hot: ["g1"],
+      groups: [Z, L, Z, Z], gsub: ["8 个都答错", "1 个答对，7 个答错", "8 个都答错", "8 个都答错"],
+      buf: [EMPTY, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["", ""], excl: ["", ""], live: ["", ""], picks: ["", ""] },
+      say: "第 2 步：32 个回答里只有 1 个答对（日志奖励平均 0.03125，就是 1/32）。答对的那格优势 +2.47，同组另外 7 格各 −0.35；其余 3 组全是 0。",
+      code: "TRL：advantages = (rewards - mean_grouped_rewards) / (std_rewards + 1e-4)\n第 1 组：(1 − 0.125) / 0.3537 = +2.47；(0 − 0.125) / 0.3537 = −0.35" },
+
+    { badge: "第 2 步", on: ["trainer", "g0", "g1", "g2", "g3", "v_dead", "v_excl", "v_live"], hot: ["v_live", "g1"], arrows: ["a_g1_live"],
+      groups: [Z, L, Z, Z], gsub: ["死组", "活组", "死组", "死组"],
+      buf: [EMPTY, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["[0, 2, 3]", "3 个死组"], excl: ["{3 道题}", "第 0、2、3 组的题目"], live: ["[GroupRecord]", "第 1 组装成的一份"], picks: ["", ""] },
+      say: "第 1 组的 8 个优势不全相同，是活组：把它的题目、8 份回答、采样时每个 token 的 logp 和 8 个优势装成一份 GroupRecord，先放在 live_records 里。",
+      code: "live_records.append(self._record_live_group(out, start, g, prompt, group_adv))" },
+
+    { badge: "第 2 步", on: ["trainer", "g0", "g1", "g2", "g3", "v_dead", "v_excl", "v_live", "v_picks", "b0", "b1", "b2", "b3"], hot: ["v_picks"],
+      groups: [Z, L, Z, Z], gsub: ["死组，原样留着", "活组", "死组，原样留着", "死组，原样留着"],
+      buf: [EMPTY, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["[0, 2, 3]", ""], excl: ["{3 道题}", ""], live: ["[GroupRecord]", "还没存进缓冲区"], picks: ["[]", "缓冲区还是空的"] },
+      say: "先取：去缓冲区要 3 组，缓冲区还是空的，取不到，3 个死组原样留着。",
+      code: "picks = self.replay_buffer.sample_latest(3, exclude_prompts)   # → []" },
+
+    { badge: "第 2 步", on: ["trainer", "g0", "g1", "g2", "g3", "v_live", "b0", "b1", "b2", "b3"], hot: ["b0"], arrows: ["a_live_buf"],
+      groups: [Z, L, Z, Z], gsub: ["死组", "活组", "死组", "死组"],
+      buf: [REC, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["[0, 2, 3]", ""], excl: ["{3 道题}", ""], live: ["[GroupRecord]", "存进缓冲区"], picks: ["[]", ""] },
+      say: "后存：取完之后，才把这份 GroupRecord 存进缓冲区，所以本步的活组不会拿来换本步的死组。日志 buffer_size 变成 1。",
+      code: "self.replay_buffer.add_many(live_records)   # _groups.append(record)" },
+
+    { badge: "第 3 步", on: ["trainer", "g0", "g1", "g2", "g3", "v_dead", "v_excl", "b0", "b1", "b2", "b3"], hot: ["v_dead", "v_excl"],
+      groups: [Z, Z, Z, Z], gsub: ["死组", "死组", "死组", "死组"],
+      buf: [REC, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["[0, 1, 2, 3]", "4 个死组"], excl: ["{4 道题}", "第 3 步这 4 道题"], live: ["[]", "没有活组"], picks: ["", ""] },
+      say: "第 3 步：4 道新题又全部答错，32 格优势全是 0，4 组全是死组；exclude_prompts 里是这 4 道题。",
+      code: "out = super()._generate_and_score_completions(inputs)；逐组 torch.equal(...) → dead_groups = [0, 1, 2, 3]" },
+
+    { badge: "第 3 步", on: ["trainer", "g0", "g1", "g2", "g3", "v_dead", "v_excl", "v_picks", "b0", "b1", "b2", "b3"], hot: ["v_picks", "b0"], arrows: ["a_buf_picks"],
+      groups: [Z, Z, Z, Z], gsub: ["死组", "死组", "死组", "死组"],
+      buf: [REC, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["[0, 1, 2, 3]", ""], excl: ["{4 道题}", ""], live: ["[]", ""], picks: ["[GroupRecord]", "要 4 组，只有 1 组"] },
+      say: "去缓冲区要 4 组：缓冲区里那一组的题目不在 exclude_prompts 里，可以取；只有这 1 组，有几组给几组。取出的组仍留在缓冲区里。",
+      code: "eligible = [g for g in self._groups if g.prompt_ids not in exclude_prompts]\nreturn list(reversed(eligible[-count:]))   # count = 4 → 1 组" },
+
+    { badge: "第 3 步", on: ["trainer", "g0", "g1", "g2", "g3", "v_dead", "v_picks", "b0", "b1", "b2", "b3"], hot: ["g0"], arrows: ["a_buf_g0"], replay: true,
+      groups: [L, Z, Z, Z], gsub: ["换成第 2 步第 1 组的题目和 8 份回答", "死组，原样留着", "死组，原样留着", "死组，原样留着"],
+      buf: [REC, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["[0, 1, 2, 3]", "只换第一个：第 0 组"], excl: ["{4 道题}", ""], live: ["[]", ""], picks: ["[GroupRecord]", ""] },
+      say: "dead_groups 里第一个是第 0 组，就把第 0 组的 8 行换掉：第 k 行放这份 GroupRecord 的第 k 份回答和第 k 个优势（用当时的优势，不重新算）；第 1–3 组照旧。",
+      code: "local = slot % g\nrows[\"completion_ids\"][slot] = cids；advantages[slot] = record.advantages[local]" },
+
+    { badge: "第 3 步", on: ["trainer", "g0", "g1", "g2", "g3", "v_model", "b0", "b1", "b2", "b3"], hot: ["v_model", "g0"], arrows: ["a_model_g0"], replay: true, rho: true,
+      groups: [L, Z, Z, Z], gsub: ["重新打分得到 ρ（每个 token 一个）：平均 0.9958，最大 1.207", "死组", "死组", "死组"],
+      buf: [REC, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["[0, 1, 2, 3]", ""], excl: ["{4 道题}", ""], live: ["[]", ""], picks: ["[GroupRecord]", ""] },
+      say: "现在的模型给这 8 份旧回答重新打分，每个 token 得到现在的 logp；减去采样时的 logp 再取 exp，就是 ρ，超过 2.0 的压到 2.0。这一步 ρ 平均 0.9958、最大 1.207，没有被压的。",
+      code: "current_logps = self._logps_no_grad(...)\nratio = torch.exp(logp_theta_old - logp_behavior)；ratio = torch.clamp(ratio, max=rho_clip)" },
+
+    { badge: "第 3 步", on: ["trainer", "g0", "g1", "g2", "g3"], hot: ["g0"], replay: true, rho: true,
+      groups: [L, Z, Z, Z], gsub: ["损失 = −优势 × ρ，这一步只有这 8 行出力", "优势 0，不出力", "优势 0，不出力", "优势 0，不出力"],
+      buf: [REC, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["", ""], excl: ["", ""], live: ["", ""], picks: ["", ""] },
+      say: "把 ρ 写进 importance_sampling_ratio，TRL 算损失时把它乘在每个 token 外面。第 1–3 组优势是 0，不出力，所以这一步的梯度全来自换进来的第 0 组：日志 grad_norm 是 1.664，第 1 步是 0。",
+      code: "out[\"old_per_token_logps\"][replay_rows] = current_logps.detach()\nout[\"sampling_per_token_logps\"][replay_rows] = behavior_batch\nout[\"importance_sampling_ratio\"][replay_rows] = outer_ratio" },
+
+    { badge: "第 3 步", on: ["trainer", "v_live", "b0", "b1", "b2", "b3"], hot: ["b0", "b1", "b2", "b3"], onGroups: true,
+      groups: [L, Z, Z, Z], gsub: ["", "", "", ""],
+      buf: [REC, EMPTY, EMPTY, EMPTY],
+      v: { dead: ["", ""], excl: ["", ""], live: ["[]", "没有活组，不存"], picks: ["", ""] },
+      say: "本步没有活组，add_many 什么也不存，缓冲区里还是那 1 组（日志 buffer_size 仍是 1）。以后存进来的组超过 4 组时，最前面最旧的一组被丢掉。",
+      code: "self.replay_buffer.add_many(live_records)   # live_records 是 []\nif len(self._groups) > self.capacity: self._groups.pop(0)" }
+  ];
+
+  /* ---- 点击说明 ---- */
+  var PROJ = "项目文件夹 = 你 clone 下来的 POPO-OPD-Relay 那个目录";
+  var LOG = "项目文件夹/results/raw/countdown_paired_seed42_20261021/popo_s42.log";
+  var LOCAL = "_generate_and_score_completions 里的局部变量";
+
+  var NOTES = {
+    trainer: { title: "训练进程 python train.py --popo", rows: [
+      ["是什么", "正在跑 POPO 训练的 Python 进程。它用的训练器是 train.py 里的 POPOTrainer，POPOTrainer 先继承 src/POPO.py 的 GroupReplayGRPOTrainer，所以 TRL 每一步调用的 _generate_and_score_completions 是 POPO.py 里那一个。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/train.py · 项目文件夹/src/POPO.py", hint: PROJ + "。" }],
+      ["谁创建、何时结束", "用户在命令行启动；正式运行跑完 400 步退出。"],
+      ["例子来源", { scope: "project", path: LOG, hint: "这一页的第 1–3 步，就是这份日志前三行指标里记的数。" }]
+    ] },
+    zout: { title: "out", rows: [
+      ["是什么", "TRL 每一步生成回答、打完分后返回的字典，每个键是一个张量，一行对应一个回答。正式运行每步 4 道题（prompts_per_rollout = 4）、每题 8 个回答，一共 32 行。图里每一格是一行的优势 out[\"advantages\"]。"],
+      ["在哪里", { scope: "memory", path: "训练进程内存（显卡上）", hint: "POPO 换死组时改的就是这个字典里的行。" }],
+      ["谁创建、何时删", "TRL 每一步新建；POPO 在上面改完交还给 TRL，这一步算完损失就不再用。"]
+    ] },
+    group: { title: "第 g 组", rows: [
+      ["是什么", "同一道题的 8 个回答，占 out 里连续 8 行：第 g 组是第 g×8 到 g×8+7 行。8 个优势全相同是死组，不全相同是活组。"],
+      ["优势怎么来", "TRL 用组内标准化：(本行奖励 − 组内平均奖励) ÷ (组内标准差 + 0.0001)。全答对或全答错时每格都是 0。"],
+      ["在哪里", { scope: "memory", path: "out 里的 8 行", hint: "日志只记了死组占比和答对数；第 2 步活组画在第 1 组、答对的那格画在第 4 格，只为示意。" }]
+    ] },
+    zbuf: { title: "replay_buffer", rows: [
+      ["是什么", "回放缓冲区，类 ReplayBuffer：一个按从旧到新排的列表 _groups，每一项是一份 GroupRecord，最多存 capacity 组；正式运行 capacity = 4（等于每步题数）。新的追加在最后，超过 4 组就丢掉最前面的。"],
+      ["在哪里", { scope: "memory", path: "训练进程内存：self.replay_buffer", hint: "存档时写进 <输出目录>/checkpoint-<步数>/replay_buffer.json，续跑时读回来。" }],
+      ["谁创建、何时删", "训练开始前 _install_popo 创建，整个训练一直在。"]
+    ] },
+    slot: { title: "GroupRecord", rows: [
+      ["是什么", "缓冲区里存的一项：一个活组在当时的题目 prompt_ids、8 份回答 completion_ids、mask、采样时每个 token 的 logp（behavior_logps）、8 个优势 advantages，和产生它的步数 born_step。创建后不能改。"],
+      ["在哪里", { scope: "memory", path: "replay_buffer._groups 列表里", hint: "存的是 Python 元组，不在显卡上。" }],
+      ["谁创建、何时删", "_record_live_group 创建，add_many 存进缓冲区；缓冲区超过 4 组时最旧的被丢掉。"]
+    ] },
+    v_dead: { title: "dead_groups", rows: [
+      ["是什么", "本步死组的编号列表，例如 [0, 1, 2, 3]。换的时候按这个顺序，从第一个开始换。"],
+      ["在哪里", { scope: "memory", path: LOCAL }],
+      ["谁创建、何时删", "每一步开头建一个空列表，逐组检查时往里加；函数返回后就没了。"]
+    ] },
+    v_excl: { title: "exclude_prompts", rows: [
+      ["是什么", "本步死组的题目集合（每道题存成 token 编号的元组）。取历史组时，题目在这里面的不取，免得拿同一道题去换同一道题。"],
+      ["在哪里", { scope: "memory", path: LOCAL }],
+      ["谁创建、何时删", "每一步开头建一个空集合；函数返回后就没了。"]
+    ] },
+    v_live: { title: "live_records", rows: [
+      ["是什么", "本步活组做成的 GroupRecord 列表。先放在这里，等换完死组才用 add_many 存进缓冲区。"],
+      ["在哪里", { scope: "memory", path: LOCAL }],
+      ["谁创建、何时删", "每一步开头建一个空列表；add_many 之后函数返回，列表就没了，里面的 GroupRecord 留在缓冲区里。"]
+    ] },
+    v_picks: { title: "picks", rows: [
+      ["是什么", "sample_latest 返回的历史组列表：最新的排第一，最多和死组一样多，不够时有几组给几组。"],
+      ["在哪里", { scope: "memory", path: LOCAL }],
+      ["谁创建、何时删", "每一步由 sample_latest 返回；取出的组仍留在缓冲区里，picks 只是列表本身，函数返回后就没了。"]
+    ] },
+    v_model: { title: "self.model", rows: [
+      ["是什么", "正在训练的模型。_logps_no_grad 用它给换进来的旧回答重新打分，不算梯度，得到每个 token 现在的 logp。"],
+      ["在哪里", { scope: "memory", path: "训练进程内存（显卡上）", hint: "权重来自训练机上的 /data/models/Qwen2.5-1.5B（manifest.json 里的 model）。" }],
+      ["谁创建、何时删", "训练开始时 TRL 加载；每一步更新一次参数，训练结束时保存。"]
+    ] }
+  };
+
+  var KIND = { trainer: "process", zout: "memory", zbuf: "memory", group: "memory", slot: "memory",
+               v_dead: "memory", v_excl: "memory", v_live: "memory", v_picks: "memory", v_model: "memory" };
+  var KIND_TEXT = { process: "进程（正在运行的程序）", memory: "内存里的对象" };
+  var KIND_SHORT = { process: "进程", memory: "内存里的对象" };
+  var KIND_PATH = {
+    process: ["M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2z", "M6.6 5.6 10.6 8l-4 2.4z"],
+    memory: ["M3 4h10v8H3z", "M5.5 4v8", "M10.5 4v8"]
+  };
+  function noteKey(id) { return /^g\d$/.test(id) ? "group" : /^b\d$/.test(id) ? "slot" : id; }
+
+  function kindIcon(kind, x, y, parent) {
+    var g = mk("g", { "class": "kind", transform: "translate(" + x + "," + y + ")" }, parent);
+    var tt = mk("title", {}, g); tt.textContent = KIND_SHORT[kind];
+    KIND_PATH[kind].forEach(function (d) { mk("path", { d: d }, g); });
+  }
+  function addInfoIcon(g, cx, cy) {
+    var icon = mk("g", { "class": "info" }, g);
+    mk("circle", { cx: cx, cy: cy, r: 9 }, icon);
+    var t = mk("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, icon); t.textContent = "i";
+  }
+  function buildLegend() {
+    var box = $("legend");
+    ["process", "memory"].forEach(function (k) {
+      var s = document.createElement("span"); s.className = "k-" + k;
+      var svg = document.createElementNS(SVGNS, "svg"); svg.setAttribute("viewBox", "0 0 16 16");
+      KIND_PATH[k].forEach(function (d) { mk("path", { d: d }, svg); });
+      s.appendChild(svg); s.appendChild(document.createTextNode(KIND_SHORT[k])); box.appendChild(s);
+    });
+    [["pos", "优势为正"], ["neg", "优势为负"], ["zero", "优势为 0"]].forEach(function (p) {
+      var s = document.createElement("span");
+      var sw = document.createElement("i"); sw.className = "sw " + p[0];
+      s.appendChild(sw); s.appendChild(document.createTextNode(p[1])); box.appendChild(s);
+    });
+  }
+
+  var CLICK_IDS = ["trainer", "zout", "zbuf", "g0", "g1", "g2", "g3", "b0", "b1", "b2", "b3", "v_dead", "v_excl", "v_live", "v_picks", "v_model"];
+  var selected = null;
+
+  function renderNote(id) {
+    var key = noteKey(id);
+    var n = NOTES[key];
+    $("noteTitle").textContent = key === "group" ? "第 " + id.slice(1) + " 组" : n.title;
+    var rowsAll = [["类型", KIND_TEXT[KIND[key]]]].concat(n.rows);
+    var dl = $("noteRows"); dl.textContent = "";
+    var SCOPE_TEXT = { project: "项目文件夹内", memory: "训练进程内存", machine: "训练机上" };
+    rowsAll.forEach(function (row) {
+      var dt = document.createElement("dt"); dt.textContent = row[0];
+      var dd = document.createElement("dd"); var v = row[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else {
+        var p1 = document.createElement("p");
+        var chip = document.createElement("span"); chip.className = "scope " + v.scope; chip.textContent = SCOPE_TEXT[v.scope];
+        var code = document.createElement("span"); code.className = "path"; code.textContent = v.path;
+        p1.appendChild(chip); p1.appendChild(code); dd.appendChild(p1);
+        if (v.hint) { var p2 = document.createElement("p"); p2.className = "hint"; p2.textContent = v.hint; dd.appendChild(p2); }
+      }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    CLICK_IDS.forEach(function (k) {
+      $(k).classList.toggle("sel", k === selected);
+      $(k).setAttribute("aria-expanded", k === selected ? "true" : "false");
+    });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  function setupClicks() {
+    CLICK_IDS.forEach(function (id) {
+      var g = $(id);
+      g.setAttribute("tabindex", "0"); g.setAttribute("role", "button"); g.setAttribute("aria-expanded", "false");
+      var r = g.querySelector("rect.box");
+      var x = parseFloat(r.getAttribute("x")) + parseFloat(r.getAttribute("width"));
+      var y = parseFloat(r.getAttribute("y"));
+      if (/^g\d$/.test(id)) addInfoIcon(g, OX + 24, y + 46);
+      else if (/^b\d$/.test(id)) addInfoIcon(g, x - 18, y + 20);
+      else if (/^v_/.test(id)) { addInfoIcon(g, x - 18, y + 22); kindIcon(KIND[noteKey(id)], x - 50, y + 14, g); }
+      else {
+        addInfoIcon(g, x - 18, y + 18); kindIcon(KIND[noteKey(id)], x - 50, y + 10, g);
+        if (id === "trainer") g.classList.add("proc");
+      }
+      g.setAttribute("aria-label", (NOTES[noteKey(id)].title) + "，点击查看说明");
+      g.addEventListener("click", function () { choose(id); });
+      g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(id); } });
+    });
+    $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+  }
+
+  /* ---- 翻页 ---- */
+  var NODES = ["trainer", "g0", "g1", "g2", "g3", "b0", "b1", "b2", "b3", "v_dead", "v_excl", "v_live", "v_picks", "v_model"];
+  var ARROWS = ["a_g1_live", "a_live_buf", "a_buf_g0", "a_buf_picks", "a_model_g0"];
+  var cur = 0;
+
+  function fmt(x) { return x === 0 ? "0" : (x > 0 ? "+" : "−") + Math.abs(x).toFixed(2); }
+
+  function show(i) {
+    cur = Math.max(0, Math.min(STEPS.length - 1, i));
+    var s = STEPS[cur];
+    var on = s.on.concat(s.onAlso || []);
+    if (s.onGroups) on = on.concat(["g0", "g1", "g2", "g3"]);
+    NODES.forEach(function (id) {
+      $(id).classList.toggle("on", on.indexOf(id) >= 0);
+      $(id).classList.toggle("hot", s.hot.indexOf(id) >= 0);
+    });
+    $("g0").classList.toggle("replay", !!s.replay);
+    ARROWS.forEach(function (id) { $(id).classList.toggle("show", (s.arrows || []).indexOf(id) >= 0); });
+    for (var g = 0; g < 4; g++) {
+      for (var c = 0; c < 8; c++) {
+        var v = s.groups[g][c];
+        var cell = $("c" + g + "_" + c);
+        cell.setAttribute("class", "cell" + (v > 0 ? " pos" : v < 0 ? " neg" : ""));
+        cell.querySelector("text").textContent = fmt(v);
+      }
+      $("gs" + g).textContent = s.gsub[g];
+    }
+    for (var b = 0; b < 4; b++) {
+      var sub = s.buf[b][1].split("：");
+      $("bt" + b).textContent = s.buf[b][0];
+      $("bs" + b).textContent = sub[0] + (sub.length > 1 ? "：" : "");
+      $("bq" + b).textContent = sub.slice(1).join("：");
+      $("b" + b).classList.toggle("empty", s.buf[b][0] === "空");
+    }
+    [["dead", "t_dead"], ["excl", "t_excl"], ["live", "t_live"], ["picks", "t_picks"]].forEach(function (p) {
+      $(p[1]).textContent = s.v[p[0]][0];
+      $(p[1] + "2").textContent = s.v[p[0]][1];
+    });
+    $("badgeText").textContent = s.badge;
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + STEPS.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === STEPS.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash("replay", cur + 1);
+  }
+
+  STEPS.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 页");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+
+  buildLegend();
+  setupClicks();
+  show(0);
+
+  window.__v = window.__v || {};
+  window.__v.replay = { show: show, cur: function () { return cur; } };
+})();
+(function () {
+  var P = "e-";
+
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var $ = function (id) { return document.getElementById(P + id); };
+  function mk(tag, attrs, parent, text) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+
+  /* ---- 左边的部件 ---- */
+  var LX = 20, LW = 250, LH = 68;
+  var PARTS = [
+    ["dl",      "memory",   "RepeatSampler",          "按它的顺序取题"],
+    ["vllm",    "memory",   "vLLM 引擎",              "写回答，用学生的参数"],
+    ["model",   "memory",   "self.model",             "学生 Qwen2.5-0.5B，正在训练"],
+    ["reward",  "function", "reward_countdown",       "照常判分，结果不用来训练"],
+    ["teacher", "memory",   "self.opd_teacher",       "教师 popo_s42，不训练"],
+    ["opt",     "memory",   "AdamW（self.optimizer）", "攒满 16 次梯度才改参数"]
+  ];
+  var PY = {}; PARTS.forEach(function (p, i) { PY[p[0]] = 50 + i * 78; });
+
+  /* ---- 中间：out，和其中一行回答的 8 个 token（数字是示意） ---- */
+  var OX = 300, OW = 440;
+  var FIELDS = ["prompt_ids", "completion_ids", "sampling_per_token_logps", "old_per_token_logps", "importance_sampling_ratio", "advantages"];
+  var F3 = FIELDS.slice(0, 3), F5 = FIELDS.slice(0, 5);
+  var TY = [168, 214, 260, 306, 352];   // token、学生 logp、教师 logp、weight、advantages 这 5 排的 y
+  var TROW = ["token", "学生 logp", "教师 logp", "weight", "advantages"];
+  var TOK = ["42", "-", "32", "=", "10", "*", "5", "="];
+  var SL = [-0.21, -0.93, -0.38, -0.05, -3.82, -1.24, -0.61, -0.27];   // 学生 logp
+  var TL = [-0.12, -0.31, -0.47, -0.06, -0.18, -4.95, -0.42, -0.09];   // 教师 logp
+  var W  = [-0.09, -0.62,  0.09,  0.01, -3.00,  3.00, -0.19, -0.18];   // 学生 − 教师，压到 ±3
+  var CLIP = [false, false, false, false, true, true, false, false];
+  var A  = W.map(function (v) { return -v; });                         // 优势 = weight × (−1)
+  /* ---- 右边：_buffered_inputs 16 份 ---- */
+  var BX = 770, BW = 210;
+
+  var STEPS = [
+    { on: ["dl"], hot: ["dl"], arrows: ["a_dl"], fields: [], rows: [],
+      say: "学生训练第 1 步开始。RepeatSampler 按顺序取出 4 道题，每道抄成 8 行，一共 32 行；每行是发给学生的题目文字，外加 nums 和 target。",
+      code: "RepeatSampler(mini_repeat_count=8, batch_size=32 // 8, repeat_count=16)   # GRPOTrainer._get_train_sampler" },
+
+    { on: ["dl", "vllm"], hot: ["vllm"], arrows: ["a_vllm"], fields: F3, rows: [0], hotRow: [0],
+      tnote: "图里画的是某一行回答里连续的 8 个 token",
+      say: "vLLM 用学生 Qwen2.5-0.5B 的参数给 32 行各写一个回答：温度 1.0，最长 1,024 个 token，写到 </answer> 或 \\nUser: 就停，顺手记下每个 token 采样时的 logp。第 1 步回答平均 201.7 个 token，32 个里有 18 个写满 1,024 个 token 还没停（日志 clipped_ratio 0.5625）。",
+      code: "GRPOConfig(temperature=1.0, max_completion_length=1024, generation_kwargs={\"stop\": countdown.STOPS}, vllm_mode=\"colocate\")\n→ prompt_ids_list, completion_ids_list, sampling_per_token_logps_list = self._generate(prompts)" },
+
+    { on: ["dl", "vllm", "model"], hot: ["model"], arrows: ["a_model"], fields: F5, rows: [0, 1], hotRow: [1],
+      say: "self.model（学生，不算梯度）给这 32 个回答的每个 token 再打一遍分，得到 old_per_token_logps，就是图里“学生 logp”这一排。vLLM 和 self.model 算出来的会有一点差：每个 token 取 exp(self.model 的 − vLLM 的)，压到 0.1 到 3.0 之间，就是 importance_sampling_ratio；第 1 步在 0.7294 到 1.756 之间。",
+      code: "old_per_token_logps, _, _ = self._get_per_token_logps_and_entropies(self.model, ...)   # with torch.no_grad()\nvllm_importance_sampling_ratio = torch.clamp(torch.exp(old_per_token_logps - sampling_per_token_logps), min=0.1, max=3.0)" },
+
+    { on: ["dl", "vllm", "model", "reward"], hot: ["reward"], arrows: ["a_reward"], fields: FIELDS, rows: [0, 1, 4], merged: true, hotRow: [4],
+      say: "reward_countdown 逐个判分，TRL 照常按组算优势。第 1 步 32 个回答全答错，奖励全是 0，每组 8 个分数一样，优势全是 0（日志 frac_reward_zero_std 是 1）。这时每行只有 1 个优势，这一行的 8 个 token 共用它。",
+      code: "rewards_per_func = self._calculate_rewards(inputs, prompts, completions, completion_ids_list)\nadvantages = (rewards - mean_grouped_rewards) / (std_rewards + 1e-4)   # 32 个都是 0，形状 (32,)" },
+
+    { on: [], hot: [], arrows: [], fields: FIELDS, rows: [0, 1, 4], merged: true, hotRow: [1],
+      say: "上面 4 步都是 OPDGRPOTrainer._generate_and_score_completions 第一行 super() 里 TRL 做的。TRL 把 out 交回 OPD；OPD 先取出学生的打分：直接用 out 里的 old_per_token_logps，学生不再重算。",
+      code: "out = super()._generate_and_score_completions(inputs)   # OPDGRPOTrainer._generate_and_score_completions 的第一行\nstudent_logps = out[\"old_per_token_logps\"]" },
+
+    { on: ["teacher"], hot: ["teacher"], arrows: ["a_teacher"], fields: FIELDS, rows: [0, 1, 2, 4], merged: true, hotRow: [2],
+      say: "教师 self.opd_teacher 给学生写的每个 token 也打一遍分，不算梯度：32 行分 4 批，每批 8 行（opd_teacher_batch_size=8）。每行把题目和回答接在一起送进教师，取出回答那一段每个位置对“下一个 token”的预测，再取学生实际写出的那个 token 的 logp，补位的位置记 0。得到的就是图里“教师 logp”这一排。",
+      code: "for i in range(0, prompt_ids.shape[0], self.opd_teacher_batch_size):\n    sl = slice(i, i + self.opd_teacher_batch_size)\n    chunks.append(teacher_logps_no_grad(self.opd_teacher, prompt_ids[sl], prompt_mask[sl], completion_ids[sl], completion_mask[sl]))\nteacher_logps = torch.cat(chunks, dim=0)" },
+
+    { on: ["teacher"], hot: [], arrows: [], fields: FIELDS, rows: [0, 1, 2, 3, 4], merged: true, hotRow: [3],
+      tnote: "橙色虚线框：差距超过 3、被压到 ±3 的 token",
+      say: "每个 token 的 weight = 学生 logp − 教师 logp：正的说明学生比教师更愿意写这个 token，负的说明教师比学生更愿意写。再压到 −3 到 3 之间（opd_weight_clip=3）：图里 −3.64 压成 −3，+3.71 压成 +3。第 1 步被压过的 token 占真实 token 的 0.08552，weight 平均 0.4699。",
+      code: "gap = student_logps.detach() - teacher_logps.detach()                  # opd_token_weights\nweight = torch.clamp(gap, min=-opd_weight_clip, max=opd_weight_clip)   # opd_weight_clip = 3" },
+
+    { on: [], hot: [], arrows: [], fields: FIELDS, rows: [0, 1, 2, 3, 4], hotRow: [4],
+      say: "advantages = weight × (−1) = 教师 logp − 学生 logp，写回 out[\"advantages\"]，把上面 TRL 按奖励算的那份整个换掉：从每行 1 个、形状 (32,)，变成每个 token 1 个、形状 (32, 回答长度)。教师更愿意写的 token（例如 10）优势为正，教师不愿意写的（例如 *）优势为负。importance_sampling_ratio 不动。",
+      code: "out[\"advantages\"] = weight.to(device=advantages.device, dtype=advantages.dtype) * advantage_scale   # apply_opd_token_advantages，advantage_scale = −1" },
+
+    { on: [], hot: [], arrows: ["a_buf"], fields: FIELDS, rows: [0, 1, 2, 3, 4], slots: "full", cur: 0,
+      say: "OPD 把改好的 out 交回 TRL。后面和 GRPO 一模一样：32 行打乱顺序，切成 16 份、每份 2 行，存进 _buffered_inputs；第 1 次 training_step 拿第 1 份。",
+      code: "return out   # OPDGRPOTrainer 交回 TRL\ngeneration_batch = shuffle_sequence_dict(generation_batch)\nself._buffered_inputs = split_tensor_dict(generation_batch, self.args.steps_per_generation)   # 16 份" },
+
+    { on: ["model"], hot: ["model"], arrows: ["a_loss"], fields: FIELDS, rows: [0, 1, 2, 3, 4], slots: "full", cur: 0, grad: 1,
+      say: "算损失：self.model（这次算梯度）给这 2 行的每个 token 打分，参数还没改，新旧比值 exp(新 − 旧) 等于 1。TRL 看到优势是二维的，就不让一行共用一个，而是每个 token 用自己的：每个 token 的损失 = −这个 token 的优势 × importance_sampling_ratio；每行对 token 求平均，2 行再平均，最后除以 16。backward 把梯度加到学生的参数上。",
+      code: "if advantages.dim() == 1:\n    advantages = advantages.unsqueeze(1)   # OPD 给的是二维，这一行不执行\nper_token_loss = -torch.min(coef_1 * advantages, coef_2 * advantages) * inputs[\"importance_sampling_ratio\"]\nloss = ((per_token_loss * mask).sum(-1) / mask.sum(-1).clamp(min=1.0)).mean() / 16" },
+
+    { on: ["model", "opt"], hot: ["opt"], arrows: ["a_opt"], fields: FIELDS, rows: [0, 1, 2, 3, 4], slots: "full", cur: 15, grad: 16,
+      say: "第 2 到 16 次 training_step 照样各拿一份、算损失、加梯度。攒满 16 次：先把梯度的总长度压到 1.0 以内（日志 grad_norm 22.12 是压之前的长度），FiniteGradients 查一遍没有 NaN、Inf，AdamW 按学习率 5e-06 改一次学生的参数。教师不在 AdamW 里，参数不变。global_step 变成 1，日志写下 loss 0.6429。",
+      code: "grad_norm = self._clip_grad_norm(model)   # max_grad_norm=1.0，返回压之前的长度\nself.callback_handler.on_pre_optimizer_step(...)   # FiniteGradients\nself.optimizer.step(); self.lr_scheduler.step(); model.zero_grad()" },
+
+    { on: ["dl", "vllm", "model", "teacher", "opt"], hot: ["vllm"], arrows: [], fields: [], rows: [], slots: "empty",
+      say: "第 2 步：再取 4 道新题，先把刚改过的学生参数拷进 vLLM，再走一遍上面的流程，一共 400 步。到第 400 步，weight 平均从 0.4699 降到 0.04626，被压到 ±3 的 token 比例从 0.08552 降到 0.007255：学生给自己回答打的分越来越接近教师。reward 一直记在日志里，第 400 步还是 0，但它不参与训练。",
+      code: "if self.state.global_step != self._last_loaded_step: self.vllm_generation.sync_weights()\n# 第 400 步日志：opd/weight_mean 0.04626   opd/weight_clip_fraction 0.007255   reward 0" }
+  ];
+
+  /* ---- 点击说明 ---- */
+  var TDIR = "/data/Math-RLVR-POPO/countdown_n3_s42_rho2_20261021/popo_s42";
+  var NOTES = {
+    proc: { title: "训练进程", kind: "process", rows: [
+      ["是什么", "python train.py --opd 跑起来的那一个进程。OPDTrainer、vLLM、学生、教师、AdamW 都在这一个进程里，用同一张显卡（vllm_mode=\"colocate\"，教师放在 0 号显卡）。"],
+      ["正式运行的命令", "--model Qwen/Qwen2.5-0.5B --opd --opd-teacher-model " + TDIR + " --opd-weight-clip 3 --save-steps 100 --seed 42 --steps 400"],
+      ["优势的符号", "train.py 的 --opd-advantage-scale 默认 −1，所以优势 = 教师 logp − 学生 logp。这次运行的 manifest.json 里这个系数记作 opd_dead_advantage: -1。"],
+      ["谁创建、何时结束", "用户启动；400 步跑完、写好 TRAIN_COMPLETE.json 后退出，用时 4,121 秒。"] ] },
+    dl: { title: "RepeatSampler", kind: "memory", rows: [
+      ["是什么", "TRL 给训练数据换的取样器：每次取 4 道题（32 ÷ 8），每道连着抄 8 行；同一批 32 行要给 16 次 training_step 用，所以它把同一批重复交出 16 次（repeat_count=16），只在第 1 次生成。"],
+      ["在哪里", { scope: "env", path: "trl/trainer/utils.py 的 RepeatSampler；GRPOTrainer._get_train_sampler 创建", hint: "训练机 Python 环境里装的 TRL 1.13.0。" }],
+      ["谁创建、何时删", "trainer.train() 建数据加载器时创建，整个训练一直在。"] ] },
+    vllm: { title: "vLLM 引擎", kind: "memory", rows: [
+      ["是什么", "专门快速生成文字的引擎，手里是学生参数的拷贝。和训练用同一张显卡，只占 25% 显存（vllm_gpu_memory_utilization=0.25）。每步生成前，如果 global_step 变了，先从 self.model 拷一次参数。"],
+      ["在哪里", { scope: "memory", path: "self.vllm_generation（训练进程内存，显卡上）" }],
+      ["谁创建、何时删", "GRPOTrainer 的 __init__ 创建；训练结束时没了。"] ],
+      sample: ["第 1 步生成的回答长度（日志真实记录，单位 token）：", "completions/mean_length: 201.7   completions/max_length: 1024   completions/clipped_ratio: 0.5625"] },
+    model: { title: "self.model", kind: "memory", rows: [
+      ["是什么", "正在训练的学生，Qwen2.5-0.5B 全部参数都训练。每步用它两次：生成后不算梯度打一遍分（old_per_token_logps，OPD 拿它当学生 logp）；每次 training_step 算梯度再打一遍分（per_token_logps）。"],
+      ["在哪里", { scope: "memory", path: "训练进程内存（显卡上）", hint: "从 Hugging Face 的 Qwen/Qwen2.5-0.5B 载入，commit 060db6499f32faf8b98477b0a26969ef7d8b9987。" }],
+      ["谁创建、何时删", "GRPOTrainer 的 __init__ 载入；每步被 AdamW 改一次参数；每 100 步存一个 checkpoint-<步数>/，训练结束保存最终模型。"] ] },
+    reward: { title: "reward_countdown", kind: "function", rows: [
+      ["是什么", "src/countdown.py 里的函数：答对给 1.0，答错给 0.0。OPD 时 TRL 照常调用它、照常按组算优势，但 OPD 随后把优势整个换掉，所以它的结果只记进日志，不参与训练。"],
+      ["在哪里", { scope: "project", path: "项目文件夹/src/countdown.py" }],
+      ["谁调用", "GRPOTrainer._calculate_rewards，每步生成完调用一次，32 个回答一起判。"] ],
+      sample: ["第 1 步的分数（日志真实记录）：", "reward: 0   reward_std: 0   frac_reward_zero_std: 1"] },
+    teacher: { title: "self.opd_teacher", kind: "memory", rows: [
+      ["是什么", "教师模型：popo_s42 训练完的最终模型（POPO 从 Qwen2.5-1.5B 训出来的教师）。打分时不算梯度，也不在 AdamW 里，所以整个学生训练里它的参数不变。"],
+      ["在哪里", { scope: "memory", path: "self.opd_teacher（训练进程内存，0 号显卡）", hint: "从训练机上的 " + TDIR + " 载入。" }],
+      ["谁创建、何时删", "train.py 建好训练器后调用 _install_opd：先检查 opd_weight_clip 不是负数、教师和学生的分词器完全一样（每个词的编号、结束符、开始符），再以 bf16、评估模式载入；训练结束时没了。"] ],
+      sample: ["第 1 步学生和教师打分的差距 weight（日志真实记录）：", "opd/weight_mean: 0.4699   opd/weight_min: -3   opd/weight_max: 3   opd/weight_clip_fraction: 0.08552"] },
+    opt: { title: "AdamW（self.optimizer）", kind: "memory", rows: [
+      ["是什么", "按梯度改学生参数的优化器（optim=\"adamw_torch_fused\"）。学习率从 5e-06 线性降到 0，第 1 步是 5e-06。每攒满 16 次 training_step 的梯度才改一次参数。"],
+      ["在哪里", { scope: "memory", path: "训练进程内存（显卡上）" }],
+      ["谁创建、何时删", "trainer.train() 开始时创建；训练结束时没了。"] ],
+      sample: ["第 1 步改参数前后（日志真实记录）：", "grad_norm: 22.12   learning_rate: 5e-06   loss: 0.6429"] },
+    out: { title: "out（本步 32 行）", kind: "memory", rows: [
+      ["是什么", "_generate_and_score_completions 返回的字典，每个键是一个张量，一行对应一个回答。OPD 只改其中一个键：advantages。"],
+      ["每个键", "prompt_ids：题目的 token 编号（左边补齐）。completion_ids：回答的 token 编号（右边补齐）。sampling_per_token_logps：vLLM 采样时每个 token 的 logp。old_per_token_logps：学生生成后打的分，OPD 拿它当学生 logp。importance_sampling_ratio：两者之差取 exp，压到 0.1–3.0，OPD 不动它。advantages：TRL 算的是每行一个，OPD 换成每个 token 一个。"],
+      ["图里那 8 个 token", "token 是真实例子里会出现的样子，学生 logp、教师 logp 这些数字是示意，只为说明怎么算；日志里只记了全部 token 的 weight 平均、最小、最大和被压过的比例。"],
+      ["在哪里", { scope: "memory", path: "训练进程内存（显卡上）" }],
+      ["谁创建、何时删", "每步生成时新建，切成 16 份放进 _buffered_inputs，下一步生成时被新的替换。"] ] },
+    buf: { title: "_buffered_inputs", kind: "memory", rows: [
+      ["是什么", "out 打乱后切成的 16 份，每份 2 行（per_device_train_batch_size=2）。第 k 次 training_step 拿第 k 份；每行带着自己那一排逐 token 的优势。"],
+      ["在哪里", { scope: "memory", path: "self._buffered_inputs（训练进程内存）" }],
+      ["谁创建、何时删", "_prepare_inputs 在每步第 1 次 training_step 时写入，下一步生成时被替换。"] ] }
+  };
+  var KIND_PATH = {
+    process: ["M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2z", "M6.6 5.6 10.6 8l-4 2.4z"],
+    memory: ["M3 4h10v8H3z", "M5.5 4v8", "M10.5 4v8"],
+    function: ["M5.5 3.5 2.5 8l3 4.5", "M10.5 3.5 13.5 8l-3 4.5"]
+  };
+  var KIND_TEXT = { process: "进程（正在运行的程序）", memory: "内存里的对象", function: "函数（写在 .py 文件里的代码）" };
+  var KIND_SHORT = { process: "进程", memory: "内存里的对象", function: "函数" };
+
+  function icons(g, x, y, kind) {
+    var k = mk("g", { "class": "kind", transform: "translate(" + (x - 50) + "," + (y - 8) + ")" }, g);
+    mk("title", {}, k, KIND_SHORT[kind]);
+    KIND_PATH[kind].forEach(function (d) { mk("path", { d: d }, k); });
+    var icon = mk("g", { "class": "info" }, g);
+    mk("circle", { cx: x - 18, cy: y, r: 9 }, icon);
+    mk("text", { x: x - 18, y: y + 4, "text-anchor": "middle" }, icon, "i");
+  }
+  function clickable(g, id) {
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button");
+    g.addEventListener("click", function () { choose(id); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(id); } });
+    if (selected === id) g.classList.add("sel");
+  }
+  function fmt(v) { return v === 0 ? "0.00" : (v > 0 ? "+" : "−") + Math.abs(v).toFixed(2); }
+
+  function draw(s) {
+    var root = $("draw"); root.textContent = "";
+    // 进程的外框
+    var pg = mk("g", { id: P + "box_proc", "class": "node clickable on proc" }, root);
+    mk("rect", { "class": "box procframe", x: 6, y: 6, width: 988, height: 548, rx: 14 }, pg);
+    mk("text", { "class": "colhead", x: 22, y: 30 }, pg, "训练进程（python train.py --opd）：下面的东西都在这一个进程里、同一张显卡上");
+    icons(pg, 994, 24, "process");
+    clickable(pg, "proc");
+    // 左边部件
+    PARTS.forEach(function (p) {
+      var y = PY[p[0]];
+      var g = mk("g", { id: P + "box_" + p[0], "class": "node clickable" + (s.on.indexOf(p[0]) >= 0 ? " on" : "") + (s.hot.indexOf(p[0]) >= 0 ? " hot" : "") }, root);
+      mk("rect", { "class": "box", x: LX, y: y, width: LW, height: LH, rx: 10 }, g);
+      mk("text", { "class": "title", x: LX + 14, y: y + 27 }, g, p[2]);
+      mk("text", { "class": "sub", x: LX + 14, y: y + 50 }, g, p[3]);
+      icons(g, LX + LW, y + 22, p[1]);
+      clickable(g, p[0]);
+    });
+    // 中间 out
+    var og = mk("g", { id: P + "box_out", "class": "node clickable on" }, root);
+    mk("rect", { "class": "box zonebox", x: OX, y: 50, width: OW, height: 412, rx: 12 }, og);
+    mk("text", { "class": "title", x: OX + 14, y: 74 }, og, "out：本步 32 行");
+    icons(og, OX + OW, 68, "memory");
+    clickable(og, "out");
+    var fx = OX + 14, fy = 90;
+    FIELDS.forEach(function (f) {
+      var w = f.length * 6.6 + 14;
+      if (fx + w > OX + OW - 10) { fx = OX + 14; fy += 26; }
+      var on = s.fields.indexOf(f) >= 0;
+      var cg = mk("g", { "class": "chip" + (on ? " found" : " off") }, root);
+      mk("rect", { x: fx, y: fy, width: w, height: 20, rx: 5 }, cg);
+      mk("text", { x: fx + 7, y: fy + 14, "class": "chiptext" }, cg, f);
+      fx += w + 6;
+    });
+    // 其中一行回答的 8 个 token
+    mk("text", { "class": "sub", x: OX + 14, y: 156 }, root, s.rows.length ? "其中一行回答的 8 个 token（数字是示意，只为说明怎么算）" : "还没有回答");
+    for (var r = 0; r < 5; r++) {
+      if (s.rows.indexOf(r) < 0) continue;
+      var ty = TY[r];
+      if ((s.hotRow || []).indexOf(r) >= 0) mk("rect", { "class": "rowhot", x: OX + 8, y: ty - 5, width: OW - 16, height: 46, rx: 8 }, root);
+      mk("text", { "class": "glabel", x: OX + 14, y: ty + 23 }, root, TROW[r]);
+      if (r === 4 && s.merged) {
+        var mg = mk("g", { "class": "cell txt" }, root);
+        mk("rect", { x: OX + 100, y: ty, width: 326, height: 36, rx: 5 }, mg);
+        mk("text", { x: OX + 100 + 163, y: ty + 23, "text-anchor": "middle" }, mg, "0：整行只有 1 个优势，8 个 token 共用");
+        continue;
+      }
+      for (var c = 0; c < 8; c++) {
+        var cls = "cell";
+        if (r === 0) cls += " txt"; else cls += " num";
+        if (r === 3 && CLIP[c]) cls += " clip";
+        if (r === 4) cls += A[c] > 0 ? " pos" : A[c] < 0 ? " neg" : "";
+        var cg2 = mk("g", { "class": cls }, root);
+        var cx = OX + 100 + c * 41;
+        mk("rect", { x: cx, y: ty, width: 39, height: 36, rx: 5 }, cg2);
+        var v = [null, SL, TL, W, A][r];
+        mk("text", { x: cx + 19.5, y: ty + 23, "text-anchor": "middle" }, cg2, r === 0 ? TOK[c] : fmt(v[c]));
+      }
+    }
+    if (s.tnote) mk("text", { "class": "sub", x: OX + 14, y: 420 }, root, s.tnote);
+    // 右边 _buffered_inputs
+    var bg = mk("g", { id: P + "box_buf", "class": "node clickable" + (s.slots ? " on" : "") }, root);
+    mk("rect", { "class": "box zonebox", x: BX, y: 50, width: BW, height: 412, rx: 12 }, bg);
+    mk("text", { "class": "title", x: BX + 14, y: 74 }, bg, "_buffered_inputs");
+    mk("text", { "class": "sub", x: BX + 14, y: 94 }, bg, "16 份，每份 2 行");
+    icons(bg, BX + BW, 68, "memory");
+    clickable(bg, "buf");
+    for (var k = 0; k < 16; k++) {
+      var col = k % 2, row = Math.floor(k / 2);
+      var sx = BX + 14 + col * 94, sy = 108 + row * 42;
+      var cls2 = "slot" + (s.slots === "full" ? " full" : "") + (k === s.cur ? " cur" : "") + (s.grad && k < s.grad ? " used" : "");
+      var sg = mk("g", { "class": cls2 }, root);
+      mk("rect", { x: sx, y: sy, width: 86, height: 34, rx: 6 }, sg);
+      mk("text", { x: sx + 43, y: sy + 22, "text-anchor": "middle" }, sg, "第 " + (k + 1) + " 份");
+    }
+    // 梯度条
+    mk("text", { "class": "colhead", x: OX, y: 492 }, root, "梯度：已攒 " + (s.grad || 0) + " / 16 次");
+    mk("rect", { "class": "gradbg", x: OX, y: 500, width: OW + BW + 30, height: 14, rx: 7 }, root);
+    if (s.grad) mk("rect", { "class": "gradfill", x: OX, y: 500, width: (OW + BW + 30) * s.grad / 16, height: 14, rx: 7 }, root);
+    // 箭头
+    var A2 = {
+      a_dl:      "M" + (LX + LW + 2) + " " + (PY.dl + 34) + " H" + (OX - 4),
+      a_vllm:    "M" + (LX + LW + 2) + " " + (PY.vllm + 34) + " H" + (OX - 4),
+      a_model:   "M" + (LX + LW + 2) + " " + (PY.model + 34) + " H" + (OX - 4),
+      a_reward:  "M" + (LX + LW + 2) + " " + (PY.reward + 34) + " H" + (OX - 4),
+      a_teacher: "M" + (LX + LW + 2) + " " + (PY.teacher + 34) + " H" + (OX - 4),
+      a_buf:     "M" + (OX + OW + 2) + " 260 H" + (BX - 4),
+      a_opt:     "M" + (LX + LW + 2) + " " + (PY.model + 50) + " H288 V" + (PY.opt + 34) + " H" + (LX + LW + 4)
+    };
+    if (s.arrows.indexOf("a_loss") >= 0) {
+      var cy2 = 108 + Math.floor((s.cur || 0) / 2) * 42 + 17, cx2 = BX + 14 + ((s.cur || 0) % 2) * 94;
+      A2.a_loss = "M" + (cx2 - 2) + " " + cy2 + " H" + (BX - 14) + " V" + 474 + " H" + 285 + " V" + (PY.model + 34) + " H" + (LX + LW + 4);
+    }
+    s.arrows.forEach(function (id) { mk("path", { "class": "link", d: A2[id], "marker-end": "url(#" + P + "head)" }, root); });
+  }
+
+  /* ---- 说明 ---- */
+  var selected = null;
+  var SCOPE_TEXT = { project: "项目文件夹内", env: "训练机 Python 环境里", memory: "训练进程内存" };
+  function renderNote(id) {
+    var n = NOTES[id];
+    $("noteTitle").textContent = n.title;
+    var rowsAll = [["类型", KIND_TEXT[n.kind]]].concat(n.rows);
+    if (n.sample) rowsAll.push(["长什么样", { cap: n.sample[0], pre: n.sample[1] }]);
+    var dl = $("noteRows"); dl.textContent = "";
+    rowsAll.forEach(function (row) {
+      var dt = document.createElement("dt"); dt.textContent = row[0];
+      var dd = document.createElement("dd"); var v = row[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else if (v.pre !== undefined) {
+        var pc = document.createElement("p"); pc.className = "sample-cap"; pc.textContent = v.cap; dd.appendChild(pc);
+        var pre = document.createElement("pre"); pre.className = "sample"; pre.textContent = v.pre; dd.appendChild(pre);
+      } else {
+        var p1 = document.createElement("p");
+        var chip = document.createElement("span"); chip.className = "scope " + v.scope; chip.textContent = SCOPE_TEXT[v.scope];
+        var code = document.createElement("span"); code.className = "path"; code.textContent = v.path;
+        p1.appendChild(chip); p1.appendChild(code); dd.appendChild(p1);
+        if (v.hint) { var p2 = document.createElement("p"); p2.className = "hint"; p2.textContent = v.hint; dd.appendChild(p2); }
+      }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    document.querySelectorAll("#" + P + "diagram .node").forEach(function (g) { g.classList.toggle("sel", g.id === P + "box_" + selected); });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+
+  function buildLegend() {
+    var box = $("legend");
+    ["process", "memory", "function"].forEach(function (k) {
+      var s = document.createElement("span"); s.className = "k-" + k;
+      var svg = document.createElementNS(SVGNS, "svg"); svg.setAttribute("viewBox", "0 0 16 16");
+      KIND_PATH[k].forEach(function (d) { mk("path", { d: d }, svg); });
+      s.appendChild(svg); s.appendChild(document.createTextNode(KIND_SHORT[k])); box.appendChild(s);
+    });
+    [["pos", "优势为正"], ["neg", "优势为负"]].forEach(function (p) {
+      var s = document.createElement("span");
+      var i = document.createElement("i"); i.className = "sw " + p[0];
+      s.appendChild(i); s.appendChild(document.createTextNode(p[1])); box.appendChild(s);
+    });
+  }
+
+  /* ---- 翻页 ---- */
+  var cur = 0;
+  function show(i) {
+    cur = Math.max(0, Math.min(STEPS.length - 1, i));
+    var s = STEPS[cur];
+    draw(s);
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + STEPS.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === STEPS.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash("opd", cur + 1);
+  }
+  STEPS.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 页");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+
+  buildLegend();
+  show(0);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { show(cur); });
+
+  window.__v = window.__v || {};
+  window.__v.opd = { show: show, cur: function () { return cur; } };
+})();
+
+(function () {
+  var KEYS = ["popo", "grpo", "trl", "replay", "opd", "io", "opt"], active = "popo";
+  var VIEW = { popo: "b-view", grpo: "a-view", trl: "c-view", replay: "d-view", opd: "e-view", io: "f-view", opt: "g-view" };
+  var TITLE = { popo: "POPO-OPD-Relay 项目运行逐步讲解", grpo: "GRPOTrainer 运行机制逐步讲解", trl: "POPOTrainer 和 OPDTrainer 怎么接到 TRL 上", replay: "POPO 死组重放逐步讲解", opd: "OPD 运行机制逐步讲解", io: "POPO-OPD-Relay：交给模型的是什么，模型输出的是什么", opt: "优化器逐步讲解" };
+  window.__setHash = function (key, n) {
+    if (key !== active) return;
+    try { history.replaceState(null, "", "#" + key + "-" + n); } catch (e) {}
+  };
+  function activate(key, step) {
+    active = key;
+    KEYS.forEach(function (k) {
+      document.getElementById(VIEW[k]).hidden = (k !== key);
+      var t = document.getElementById("tab-" + k);
+      t.setAttribute("aria-selected", k === key ? "true" : "false");
+    });
+    document.title = TITLE[key];
+    var v = window.__v[key];
+    if (v) v.show(step === undefined ? v.cur() : step - 1);
+    else { try { history.replaceState(null, "", "#" + key); } catch (e) {} }   // io 页没有分步，地址只记 #io   // 重画一遍：页面刚显示出来，文字宽度要重新量
+  }
+  KEYS.forEach(function (k) {
+    document.getElementById("tab-" + k).addEventListener("click", function () { activate(k); window.scrollTo(0, 0); });
+  });
+  function fromHash() {
+    var m = /^#(popo|grpo|trl|replay|opd|io|opt)(?:-(\d+))?$/.exec(location.hash);
+    if (m) activate(m[1], m[2] ? parseInt(m[2], 10) : undefined);
+    else activate(active);
+  }
+  window.addEventListener("hashchange", fromHash);
+  fromHash();
+})();
+
+</script>
+</body>
+</html>

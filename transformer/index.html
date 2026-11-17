@@ -1,0 +1,1173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transformer 编码器与解码器逐步讲解 (Copy)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #16202b; --muted: #5d6b7a; --line: #c9d1da;
+    --accent: #0b6e8a; --warm: #a8650c; --proc: #e3f1f5; --good: #2f8a4f; --bad: #b42318; --purple: #7b4fb3;
+    --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f151b; --panel: #161e26; --ink: #e6edf3; --muted: #93a1b0; --line: #2c3844;
+      --accent: #4cc0df; --warm: #f0b44c; --proc: #16303a; --good: #62d48a; --bad: #ff7b72; --purple: #b99bf0; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+  .wrap { padding: 24px 16px 40px; }
+  .view { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .view[hidden] { display: none; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0; text-wrap: balance; }
+  .gist { margin: -6px 0 0; font-size: 16px; line-height: 1.7; max-width: 48em; }
+
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  svg.diagram { display: block; width: 100%; height: auto; font-family: var(--font-body); }
+  .colhead { fill: var(--muted); font-size: 13px; font-weight: 500; }
+
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  .title { fill: var(--ink); font-family: var(--font-code); font-size: 13.5px; font-weight: 600; }
+  .titlecn { fill: var(--ink); font-size: 14px; font-weight: 700; }
+  .sub { fill: var(--muted); font-size: 12.5px; }
+  .node { opacity: 0.25; transition: opacity .45s; }
+  .node.on, .node.sel { opacity: 1; }
+  .node.hot .box { stroke: var(--accent); stroke-width: 3; }
+  .node.sel .box { stroke: var(--ink); stroke-width: 3; stroke-dasharray: 7 4; }
+  .node.proc .box { fill: var(--proc); }
+  .clickable { cursor: pointer; outline: none; }
+  .clickable:hover .box { stroke: var(--ink); }
+  .clickable:focus-visible .box { stroke: var(--ink); stroke-width: 3; }
+  .node.ghost .box { fill: none; stroke-dasharray: 6 4; stroke: var(--muted); }
+  .node.ghost .titlecn { fill: var(--muted); }
+  .node.ghost.hot .box { stroke: var(--accent); stroke-width: 2.5; }
+  .sw.ghost { border: 1.5px dashed var(--muted); background: transparent; }
+  .stack { fill: var(--panel); stroke: var(--line); stroke-width: 1.2; }
+
+  .info circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; }
+  .info text { fill: var(--muted); font-family: var(--font-code); font-size: 12px; font-weight: 600; }
+  .clickable:hover .info circle, .sel .info circle { fill: var(--ink); stroke: var(--ink); }
+  .clickable:hover .info text, .sel .info text { fill: var(--panel); }
+
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  .link { fill: none; stroke: var(--accent); stroke-width: 2.2; animation: fadein .45s; }
+  .link.back { stroke: var(--muted); stroke-dasharray: 5 4; }
+  .link.warm { stroke: var(--warm); }
+  .linklabel { fill: var(--accent); font-family: var(--font-code); font-size: 12px; font-weight: 600; animation: fadein .45s; }
+  .linklabel.muted { fill: var(--muted); font-family: var(--font-body); font-weight: 500; }
+  .linklabel.warm { fill: var(--warm); }
+
+  .chip rect { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+  .chip text { fill: var(--muted); font-family: var(--font-code); font-size: 13px; }
+  .chip.found rect { fill: var(--accent); stroke: var(--accent); }
+  .chip.found text { fill: #fff; font-weight: 600; }
+  .chip.new rect { fill: var(--warm); stroke: var(--warm); animation: fadein .45s; }
+  .chip.new text { fill: #fff; font-weight: 600; }
+  .chip.empty rect { fill: var(--panel); stroke-dasharray: 4 3; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.found text, :root:not([data-theme="light"]) .chip.new text { fill: #0f151b; } }
+
+  .gtitle { fill: var(--ink); font-size: 13px; font-weight: 700; }
+  .gtitle .code { font-family: var(--font-code); }
+  .glabel { fill: var(--muted); font-size: 12.5px; font-family: var(--font-code); }
+  .cell rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+  .cell .heat { stroke: none; fill: var(--accent); }
+  .cell text { font-family: var(--font-code); font-size: 12px; fill: var(--ink); }
+  .cell.hi rect.bg { fill: color-mix(in srgb, var(--warm) 22%, var(--panel)); stroke: var(--warm); }
+  .cell.dark text { fill: #fff; font-weight: 600; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .cell.dark text { fill: #0f151b; } }
+  .cell.masked rect.bg { fill: var(--line); stroke: var(--line); }
+  .cell.masked text { fill: var(--muted); }
+  .cell.ok rect.bg { fill: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+  .cell.ok text { fill: var(--accent); font-weight: 600; }
+  .sw.ok { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); }
+  .cell.zero text { fill: var(--muted); opacity: .55; }
+  .gridg { animation: fadein .45s; }
+  .gridg.clickable:hover .gframe { stroke: var(--ink); }
+  .gframe { fill: none; stroke: transparent; stroke-width: 2; }
+  .gridg.hot .gframe { stroke: var(--accent); stroke-width: 2.5; }
+  .region { fill: none; stroke-width: 3; }
+  .region.src { stroke: var(--good); }
+  .region.cross { stroke: var(--warm); }
+  .region.tgt { stroke: var(--purple); }
+  .sw.src { border: 2.5px solid var(--good); background: transparent; }
+  .sw.cross { border: 2.5px solid var(--warm); background: transparent; }
+  .sw.tgt { border: 2.5px solid var(--purple); background: transparent; }
+  .frame { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 2 3; }
+  .divider { stroke: var(--line); stroke-width: 1.5; }
+  .gridg.sel .gframe { stroke: var(--ink); stroke-dasharray: 7 4; }
+  .op { fill: var(--muted); font-family: var(--font-code); font-size: 18px; font-weight: 600; }
+  .bar { fill: var(--line); }
+  .bar.win { fill: var(--accent); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; color: var(--muted); font-size: 13.5px; margin-top: -6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .sw.hot { border: 3px solid var(--accent); background: var(--panel); }
+  .sw.hi { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); border-color: var(--warm); }
+  .sw.heat { background: linear-gradient(90deg, var(--panel), var(--accent)); }
+  .sw.masked { background: var(--line); }
+  .sw.new { background: var(--warm); border-color: var(--warm); }
+  .legend .icon { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--muted); display: inline-grid; place-items: center; font-family: var(--font-code); font-size: 11px; font-weight: 600; }
+
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--ink); border-radius: 14px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .note[hidden] { display: none; }
+  .note-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .note-title { margin: 0; font-family: var(--font-code); font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+  .note-close { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .note-close:hover { border-color: var(--ink); }
+  .note dl { margin: 0; display: grid; grid-template-columns: 8.5em 1fr; gap: 10px 16px; }
+  .note dt { color: var(--muted); font-size: 14px; padding-top: 1px; }
+  .note dd { margin: 0; font-size: 15px; line-height: 1.7; min-width: 0; }
+  .note dd p { margin: 0; }
+  .sample { margin: 0; font-family: var(--font-code); font-size: 12.5px; line-height: 1.55; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow: auto; }
+  .sample-cap { color: var(--muted); font-size: 13.5px; margin-bottom: 4px !important; }
+
+  .caption { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-height: 140px; display: flex; flex-direction: column; gap: 12px; }
+  .caption .say { margin: 0; font-size: 19px; line-height: 1.65; font-weight: 500; max-width: 42em; text-wrap: pretty; }
+  .caption .code { margin: 0; font-family: var(--font-code); font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+  .nav { display: flex; align-items: center; gap: 14px; }
+  .nav button.arrow-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .nav button.arrow-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .nav button.arrow-btn:disabled { opacity: .35; cursor: default; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .dots { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; justify-content: center; }
+  .dots button { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); background: var(--panel); cursor: pointer; }
+  .dots button.done { background: var(--line); }
+  .dots button.now { background: var(--accent); border-color: var(--accent); transform: scale(1.25); }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; min-width: 3.5em; text-align: right; flex: none; }
+
+  @media (min-width: 700px) {
+    .nav button.arrow-btn { position: fixed; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+    .nav .prev { left: 8px; }
+    .nav .next { right: 8px; }
+    .view { padding-inline: 64px; }
+  }
+  @media (min-width: 1200px) {
+    .view { padding-inline: 0; }
+    .nav .prev { left: calc(50% - 592px); }
+    .nav .next { right: calc(50% - 592px); }
+  }
+  @media (max-width: 640px) { .note dl { grid-template-columns: 1fr; gap: 2px 0; } .note dd { margin-bottom: 8px; } }
+  @media (prefers-reduced-motion: reduce) { .node, .link, .linklabel, .gridg, .chip.new rect { transition: none; animation: none; } }
+
+  .tabs { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 14px 16px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .tab { font-family: var(--font-body); font-size: 14px; padding: 7px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .tab:hover { border-color: var(--accent); }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0f151b; } }
+</style>
+</head>
+<body>
+<nav class="tabs" role="tablist" aria-label="切换页面">
+  <button class="tab" role="tab" id="tab-overview" aria-selected="true">整体：编码器和解码器</button>
+  <button class="tab" role="tab" id="tab-attention" aria-selected="false">注意力怎么算</button>
+  <button class="tab" role="tab" id="tab-encoder" aria-selected="false">编码器一层</button>
+  <button class="tab" role="tab" id="tab-decoder" aria-selected="false">解码器一层</button>
+  <button class="tab" role="tab" id="tab-deconly" aria-selected="false">单纯解码器模型</button>
+</nav>
+<div class="wrap">
+<div class="view" id="o-view">
+  <h1>Transformer 整体：编码器读原文，解码器一轮写一个 token</h1>
+  <p class="gist">本质上是，编码器把整句原文读一遍，给每个 token 写成一行带着上下文的数；解码器每一轮拿已经写出的译文去读这些数，写出下一个 token，直到写出结束符。</p>
+  <div class="legend" id="o-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="o-diagram" viewBox="0 0 1000 560" role="group" aria-label="Transformer 整体：编码器读原文，解码器一轮写一个 token">
+      <defs><marker id="o-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="o-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="o-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="o-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="o-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="o-noteTitle"></h2>
+      <button class="note-close" id="o-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="o-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="o-say"></p>
+    <p class="code" id="o-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="o-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="o-dots"></div>
+    <span class="count" id="o-count"></span>
+    <button class="arrow-btn next" id="o-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="a-view" hidden>
+  <h1>注意力怎么算：编码器第 1 层的多头自注意力</h1>
+  <p class="gist">本质上是，每个 token 拿自己的 Q 去和每个 token 的 K 比一比，比出来的分数变成加起来等于 1 的权重，再按这些权重把所有 token 的 V 加在一起，当作自己的新向量。</p>
+  <div class="legend" id="a-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="a-diagram" viewBox="0 0 1000 540" role="group" aria-label="注意力怎么算：编码器第 1 层的多头自注意力">
+      <defs><marker id="a-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="a-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="a-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="a-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="a-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="a-noteTitle"></h2>
+      <button class="note-close" id="a-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="a-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="a-say"></p>
+    <p class="code" id="a-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="a-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="a-dots"></div>
+    <span class="count" id="a-count"></span>
+    <button class="arrow-btn next" id="a-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="e-view" hidden>
+  <h1>编码器一层里发生了什么：原文“我 爱 猫”</h1>
+  <p class="gist">本质上是，3 个 token 的向量先互相看一遍、再各自加工一遍，每次都把加工前的向量加回来，出来还是 3 行、每行一样长。</p>
+  <div class="legend" id="e-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="e-diagram" viewBox="0 0 1000 520" role="group" aria-label="编码器一层里发生了什么：原文“我 爱 猫”">
+      <defs><marker id="e-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="e-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="e-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="e-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="e-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="e-noteTitle"></h2>
+      <button class="note-close" id="e-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="e-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="e-say"></p>
+    <p class="code" id="e-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="e-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="e-dots"></div>
+    <span class="count" id="e-count"></span>
+    <button class="arrow-btn next" id="e-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="d-view" hidden>
+  <h1>解码器一层里发生了什么：第 3 轮，输入 &lt;bos&gt; I love</h1>
+  <p class="gist">本质上是，译文里每个 token 先只看自己和前面的 token，再去原文的编码器输出里取信息，然后各自加工一遍；最后一行用来猜下一个 token。</p>
+  <div class="legend" id="d-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="d-diagram" viewBox="0 0 1000 680" role="group" aria-label="解码器一层里发生了什么：第 3 轮，输入 &lt;bos&gt; I love">
+      <defs><marker id="d-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="d-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="d-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="d-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="d-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="d-noteTitle"></h2>
+      <button class="note-close" id="d-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="d-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="d-say"></p>
+    <p class="code" id="d-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="d-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="d-dots"></div>
+    <span class="count" id="d-count"></span>
+    <button class="arrow-btn next" id="d-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="g-view" hidden>
+  <h1>从编码器 + 解码器模型推出单纯解码器模型</h1>
+  <p class="gist">本质上是，把原文接到译文前面放进同一行，love 这一行用一个掩码多头自注意力就能同时从原文和译文取信息，于是多头交叉注意力和编码器都可以删掉，剩下的就是单纯解码器模型。</p>
+  <div class="legend" id="g-legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" id="g-diagram" viewBox="0 0 1000 510" role="group" aria-label="从编码器 + 解码器模型推出单纯解码器模型">
+      <defs><marker id="g-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="g-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="g-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
+      <g id="g-draw"></g>
+    </svg>
+  </div>
+  <section class="note" id="g-note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" id="g-noteTitle"></h2>
+      <button class="note-close" id="g-noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl id="g-noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="g-say"></p>
+    <p class="code" id="g-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="g-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="g-dots"></div>
+    <span class="count" id="g-count"></span>
+    <button class="arrow-btn next" id="g-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</div>
+<script>
+var D = {"E_src": [[-0.7, 0.5, -0.5, 0.1], [-1.0, 0.8, 0.8, -0.9], [0.9, -0.7, -0.4, 0.2]], "E_tgt": [[0.9, 0.7, -1.0, 0.0], [0.1, -0.0, 0.5, -0.7], [0.5, -1.0, -0.7, -0.8], [-0.4, 0.3, -0.1, 0.6], [0.3, -1.7, 0.6, 0.8], [-0.3, 1.0, 0.2, 0.9]], "PEs": [[0.0, 1.0, 0.0, 1.0], [0.84, 0.54, 0.01, 1.0], [0.91, -0.42, 0.02, 1.0]], "embS": [[-1.4, 1.0, -1.0, 0.2], [-2.0, 1.6, 1.6, -1.8], [1.8, -1.4, -0.8, 0.4]], "X": [[-1.4, 2.0, -1.0, 1.2], [-1.16, 2.14, 1.61, -0.8], [2.71, -1.82, -0.78, 1.4]], "W": {"Q": [[0.2, 0.4, -0.1, -0.0], [-0.1, 0.5, -0.3, 0.4], [-0.1, -0.1, -0.0, -0.2], [-0.0, -0.4, -0.4, 0.2]], "K": [[0.2, -0.4, -0.2, -0.3], [-0.4, 0.0, -0.1, -0.4], [0.0, 0.3, -0.4, -0.2], [0.2, -0.0, 0.0, -0.0]], "V": [[0.8, 0.2, 0.2, -0.1], [-0.0, 0.8, -0.6, 0.9], [-0.9, 0.2, -0.9, 0.3], [0.3, 0.7, 0.9, -0.1]], "O": [[0.3, 0.8, 0.2, -0.4], [-0.4, -0.4, 0.9, -0.2], [0.9, 0.7, 0.4, -1.0], [0.8, 0.8, -1.0, 0.3]]}, "att": [{"Q": [[-0.38, 0.06], [-0.61, 0.77], [0.8, -0.31]], "K": [[-0.84, 0.26], [-1.25, 0.95], [1.55, -1.32]], "V": [[0.14, 1.96], [-2.62, 1.24], [3.29, -0.09]], "scores": [[0.33, 0.53, -0.67], [0.71, 1.48, -1.95], [-0.75, -1.29, 1.64]], "scaled": [[0.24, 0.38, -0.47], [0.5, 1.05, -1.38], [-0.53, -0.91, 1.16]], "weights": [[0.38, 0.43, 0.19], [0.35, 0.6, 0.05], [0.14, 0.1, 0.76]], "out": [[-0.47, 1.27], [-1.35, 1.42], [2.28, 0.33]]}, {"Q": [[-0.94, 1.24], [-0.21, 0.37], [-0.29, -0.29]], "K": [[0.48, -0.18], [-0.63, -0.83], [-0.05, 0.07]], "V": [[0.5, 1.52], [-3.68, 2.61], [3.59, -2.28]], "scores": [[-0.67, -0.44, 0.13], [-0.17, -0.18, 0.04], [-0.08, 0.42, -0.01]], "scaled": [[-0.48, -0.31, 0.09], [-0.12, -0.13, 0.03], [-0.06, 0.3, -0.0]], "weights": [[0.25, 0.3, 0.45], [0.32, 0.31, 0.37], [0.29, 0.41, 0.3]], "out": [[0.64, 0.14], [0.32, 0.47], [-0.28, 0.81]]}], "cat": [[-0.47, 1.27, 0.64, 0.14], [-1.35, 1.42, 0.32, 0.47], [2.28, 0.33, -0.28, 0.81]], "A": [[0.04, -0.33, 1.16, -0.66], [-0.31, -1.05, 0.67, 0.08], [0.95, 2.15, -0.17, -0.46]], "S1": [[-1.36, 1.67, 0.16, 0.54], [-1.47, 1.09, 2.28, -0.72], [3.66, 0.33, -0.95, 0.94]], "N1": [[-1.49, 1.31, -0.09, 0.27], [-1.19, 0.54, 1.34, -0.69], [1.58, -0.39, -1.16, -0.03]], "Fpre": [[-0.81, -0.03, -1.68, 0.94, -2.37, -0.01, -3.12, -0.05], [-0.37, -0.54, -0.74, 1.83, -2.03, -0.3, -0.94, 1.42], [1.24, -0.92, 0.08, -2.07, 0.56, -1.13, 0.2, -0.06]], "Fh": [[0.0, 0.0, 0.0, 0.94, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.83, 0.0, 0.0, 0.0, 1.42], [1.24, 0.0, 0.08, 0.0, 0.56, 0.0, 0.2, 0.0]], "Fo": [[0.85, -1.07, -0.29, -0.05], [1.7, -0.6, -1.18, -0.33], [-0.66, 0.08, -0.46, -0.69]], "S2": [[-0.63, 0.24, -0.38, 0.22], [0.51, -0.06, 0.17, -1.02], [0.92, -0.31, -1.62, -0.73]], "Enc": [[-1.31, 1.0, -0.63, 0.94], [1.07, 0.07, 0.48, -1.62], [1.48, 0.13, -1.3, -0.32]], "Y": [[1.8, 2.4, -2.0, 1.0], [1.84, -1.46, -1.39, -0.6], [0.11, 0.18, -0.18, 2.2]], "embT": [[1.8, 1.4, -2.0, 0.0], [1.0, -2.0, -1.4, -1.6], [-0.8, 0.6, -0.2, 1.2]], "mask": [{"Q": [[0.34, -0.48], [0.28, 1.37], [0.89, -0.67]], "K": [[-0.12, -1.2], [1.11, -0.9], [-0.42, 0.33]], "V": [[-5.14, -1.96], [-0.1, -1.52], [-1.26, -1.22]], "scores": [[0.54, 0.81, -0.3], [-1.67, -0.91, 0.33], [0.7, 1.59, -0.59]], "scaled": [[0.38, null, null], [-1.18, -0.64, null], [0.49, 1.12, -0.42]], "weights": [[1.0, 0.0, 0.0], [0.37, 0.63, 0.0], [0.3, 0.57, 0.12]], "out": [[-5.14, -1.96], [-1.96, -1.68], [-1.78, -1.62]]}, {"Q": [[1.0, 1.54], [-0.05, -0.38], [-0.14, 0.54]], "K": [[2.26, -1.8], [0.55, -0.34], [0.6, -0.98]], "V": [[-4.6, -1.26], [-1.05, -0.34], [-0.36, 0.16]], "scores": [[-0.51, 0.02, -0.91], [0.56, 0.1, 0.34], [-1.28, -0.26, -0.61]], "scaled": [[-0.36, null, null], [0.4, 0.07, null], [-0.91, -0.18, -0.43]], "weights": [[1.0, 0.0, 0.0], [0.58, 0.42, 0.0], [0.21, 0.44, 0.34]], "out": [[-4.6, -1.26], [-3.11, -0.88], [-1.57, -0.37]]}], "M": [[3.07, -8.4, 0.51, 0.5], [2.01, -5.11, 0.72, 0.93], [1.73, -3.34, -0.18, 0.55]], "T1": [[4.87, -6.0, -1.49, 1.5], [3.86, -6.57, -0.67, 0.33], [1.84, -3.16, -0.36, 2.75]], "D1": [[1.29, -1.43, -0.3, 0.44], [1.23, -1.55, 0.02, 0.29], [0.69, -1.5, -0.28, 1.09]], "cross": [{"Q": [[0.79, 0.72], [0.74, 0.64], [0.75, 0.48]], "K": [[-0.73, 0.13], [0.08, -0.1], [0.47, 0.26]], "V": [[0.15, -0.68], [0.39, 1.78], [-0.42, 1.34]], "scores": [[-0.49, -0.01, 0.56], [-0.46, -0.0, 0.52], [-0.49, 0.01, 0.48]], "scaled": [[-0.35, -0.0, 0.4], [-0.32, -0.0, 0.36], [-0.35, 0.01, 0.34]], "weights": [[0.22, 0.31, 0.47], [0.23, 0.32, 0.46], [0.23, 0.32, 0.45]], "out": [[-0.04, 1.03], [-0.03, 1.01], [-0.03, 1.02]]}, {"Q": [[-0.33, 0.11], [-0.17, 0.25], [-0.71, 0.65]], "K": [[0.43, 0.27], [-0.28, 0.32], [-0.97, 0.66]], "V": [[-1.97, -1.86], [1.45, 1.23], [2.59, 0.51]], "scores": [[-0.11, 0.13, 0.39], [-0.01, 0.13, 0.33], [-0.13, 0.4, 1.11]], "scaled": [[-0.08, 0.09, 0.28], [-0.0, 0.09, 0.23], [-0.09, 0.29, 0.79]], "weights": [[0.28, 0.33, 0.4], [0.3, 0.33, 0.38], [0.21, 0.3, 0.49]], "out": [[0.95, 0.09], [0.86, 0.04], [1.31, 0.24]]}], "C": [[0.06, -0.33, 0.21, -0.49], [0.11, -0.37, 0.15, -0.41], [-0.13, -0.21, 0.45, -0.76]], "T2": [[1.35, -1.77, -0.09, -0.05], [1.35, -1.92, 0.18, -0.12], [0.56, -1.72, 0.18, 0.33]], "D2": [[1.35, -1.47, 0.04, 0.08], [1.26, -1.53, 0.26, 0.01], [0.79, -1.71, 0.38, 0.54]], "Gh": [[0.81, 0.88, 1.59, 0.65, 0.0, 0.73, 0.0, 0.0], [0.73, 0.88, 1.58, 0.67, 0.0, 0.93, 0.0, 0.0], [0.31, 0.44, 1.23, 0.63, 0.0, 0.71, 0.0, 0.0]], "Go": [[0.46, -0.59, 1.87, 2.49], [0.67, -0.5, 1.86, 2.61], [0.57, -0.07, 1.4, 1.69]], "T3": [[1.81, -2.07, 1.91, 2.57], [1.93, -2.03, 2.12, 2.62], [1.36, -1.79, 1.78, 2.23]], "D3": [[0.41, -1.71, 0.47, 0.83], [0.41, -1.72, 0.52, 0.78], [0.3, -1.7, 0.56, 0.85]], "logits": [[-1.3, -0.3, 0.92, -0.23, 3.97, -0.99], [-1.35, -0.25, 0.93, -0.26, 3.98, -1.03], [-1.48, -0.28, 0.78, -0.18, 3.99, -0.92]], "probs": [[0.0, 0.01, 0.04, 0.01, 0.92, 0.01], [0.0, 0.01, 0.04, 0.01, 0.92, 0.01], [0.0, 0.01, 0.04, 0.01, 0.92, 0.01]], "F": {"W1": [[0.3, -0.7, 0.1, -0.4, 0.7, -0.8, 0.8, -0.3], [-0.7, -0.1, -0.8, 0.5, -0.3, -0.3, -0.8, -0.6], [0.0, -0.8, -0.0, 0.9, -0.2, -0.6, 0.6, 0.3], [0.2, -0.8, -0.3, -0.1, -0.2, -0.6, -0.5, -0.7]], "b1": [0.5, -0.8, -0.4, -0.2, -0.9, -0.7, -0.7, 0.5]}};
+var D2 = {"weights": [[1.0, 0.0, 0.0, 0.0, 0.0, 0.0], [0.66, 0.34, 0.0, 0.0, 0.0, 0.0], [0.33, 0.36, 0.32, 0.0, 0.0, 0.0], [0.16, 0.12, 0.24, 0.48, 0.0, 0.0], [0.25, 0.43, 0.15, 0.07, 0.09, 0.0], [0.22, 0.32, 0.13, 0.07, 0.11, 0.15]], "logits": [-0.71, -0.66, -1.31, 1.15, -1.53, -1.09, 4.01, -1.16], "probs": [0.01, 0.01, 0.0, 0.05, 0.0, 0.01, 0.91, 0.01]};
+var SVGNS = "http://www.w3.org/2000/svg";
+function fmt(v) {
+  if (typeof v === "string") return v;
+  if (v === null) return "−∞";
+  if (Math.abs(v) < 0.005) return "0.00";
+  return (v < 0 ? "−" : "") + Math.abs(v).toFixed(2);
+}
+function vec(row) { return "(" + row.map(fmt).join(", ") + ")"; }
+function col(M, a, b) { return M.map(function (r) { return r.slice(a, b); }); }
+
+/* 一个页面：顶部 h1 和一句话，中间 SVG，点框看说明，下面是这一步的说明和代码，最下面翻页 */
+function makeView(cfg) {
+  var P = cfg.P;
+  var $ = function (id) { return document.getElementById(P + id); };
+  var selected = null, cur = 0;
+
+  function mk(tag, attrs, parent, text) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+  function clickable(g, id) {
+    g.classList.add("clickable");
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button");
+    g.setAttribute("aria-label", cfg.notes[id].title + "，点击查看说明");
+    g.setAttribute("data-id", id);
+    if (id === selected) g.classList.add("sel");
+    g.addEventListener("click", function () { choose(id); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(id); } });
+  }
+  function info(g, cx, cy) {
+    var ic = mk("g", { "class": "info" }, g);
+    mk("circle", { cx: cx, cy: cy, r: 9 }, ic);
+    mk("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, ic, "i");
+  }
+  /* 框：id、x、y、宽、高、标题、小字；s.on 里有它就亮，s.hot 里有它就描蓝边 */
+  function box(root, s, id, x, y, w, h, title, sub, opt) {
+    opt = opt || {};
+    var g = mk("g", { "class": "node" + (s.on.indexOf(id) >= 0 ? " on" : "") + (s.hot.indexOf(id) >= 0 ? " hot" : "") + (opt.proc ? " proc" : "") }, root);
+    if (opt.ghost) g.classList.add("ghost");
+    if (opt.stack) {
+      mk("rect", { "class": "stack", x: x + 10, y: y - 10, width: w, height: h, rx: 10 }, g);
+      mk("rect", { "class": "stack", x: x + 5, y: y - 5, width: w, height: h, rx: 10 }, g);
+    }
+    mk("rect", { "class": "box", x: x, y: y, width: w, height: h, rx: 10 }, g);
+    var oneLine = !sub;
+    mk("text", { "class": opt.cn ? "titlecn" : "title", x: x + 14, y: oneLine ? y + h / 2 + 5 : y + 24 }, g, title);
+    if (sub) mk("text", { "class": "sub", x: x + 14, y: y + 44 }, g, sub);
+    info(g, x + w - 18, oneLine ? y + h / 2 : y + 20);
+    clickable(g, id);
+    return g;
+  }
+  function chip(root, x, y, text, kind) {
+    var w = Math.max(34, text.replace(/[^\x00-\xff]/g, "xx").length * 8 + 18);
+    var g = mk("g", { "class": "chip" + (kind ? " " + kind : "") }, root);
+    mk("rect", { x: x, y: y, width: w, height: 26, rx: 6 }, g);
+    mk("text", { x: x + w / 2, y: y + 18, "text-anchor": "middle" }, g, text);
+    return w;
+  }
+  /* 数字网格：o.rows 行名、o.cols 列名、o.hiRow 跟着看的那一行、o.heat 按数值深浅上色（0–1）、o.zero 把 0 变淡 */
+  function grid(root, x, y, M, o) {
+    o = o || {};
+    var cw = o.cw || 52, ch = 28;
+    var g = mk("g", { "class": "gridg" + (o.hot ? " hot" : "") }, root);
+    var top = y;
+    if (o.title) { mk("text", { "class": "gtitle", x: x, y: y + 13 }, g, o.title); top += 22; }
+    if (o.cols) {
+      o.cols.forEach(function (c, j) { mk("text", { "class": "glabel", x: x + j * cw + cw / 2, y: top + 12, "text-anchor": "middle" }, g, c); });
+      top += 18;
+    }
+    M.forEach(function (row, i) {
+      if (o.rows) mk("text", { "class": "glabel", x: x - 8, y: top + i * ch + 19, "text-anchor": "end" }, g, o.rows[i]);
+      row.forEach(function (v, j) {
+        var hiCell = (o.hiRow === i) || (o.hiRows && o.hiRows.indexOf(i) >= 0) || (o.hiCols && o.hiCols.indexOf(j) >= 0) || (o.hiAll);
+        var cls = "cell" + (hiCell ? " hi" : "") + (v === null ? " masked" : "") + (v === "✓" ? " ok" : "") + (o.zero && v === 0 ? " zero" : "") + (o.heat && v !== null && v > 0.55 ? " dark" : "");
+        var cg = mk("g", { "class": cls }, g);
+        mk("rect", { "class": "bg", x: x + j * cw, y: top + i * ch, width: cw, height: ch }, cg);
+        if (o.heat && v !== null) mk("rect", { "class": "heat", x: x + j * cw + 1, y: top + i * ch + 1, width: cw - 2, height: ch - 2, "fill-opacity": Math.min(1, v * 0.95) }, cg);
+        mk("text", { x: x + j * cw + cw / 2, y: top + i * ch + 18.5, "text-anchor": "middle" }, cg, fmt(v));
+      });
+    });
+    var w = M[0].length * cw, hgt = top - y + M.length * ch;
+    if (o.id) {
+      mk("rect", { "class": "gframe", x: x - (o.rows ? 52 : 6), y: y - 6, width: w + (o.rows ? 58 : 12), height: hgt + 12, rx: 8 }, g);
+      g.insertBefore(g.lastChild, g.firstChild);
+      if (o.title) { var tw = o.title.replace(/[^\x00-\xff]/g, "xx").length * 6.6; info(g, Math.max(x + w - 6, x + tw + 14), y + 9); }
+      clickable(g, o.id);
+    }
+    return { w: w, h: hgt, bottom: y + hgt, right: x + w };
+  }
+  function arrow(root, d, cls) { return mk("path", { "class": "link" + (cls ? " " + cls : ""), d: d, "marker-end": "url(#" + P + (cls === "back" ? "headm" : cls === "warm" ? "headw" : "head") + ")" }, root); }
+  function label(root, x, y, text, cls, anchor) { return mk("text", { "class": "linklabel" + (cls ? " " + cls : ""), x: x, y: y, "text-anchor": anchor || "start" }, root, text); }
+  var api = { mk: mk, box: box, chip: chip, grid: grid, arrow: arrow, label: label };
+
+  function renderNote(id) {
+    var n = cfg.notes[id];
+    $("noteTitle").textContent = n.title;
+    var dl = $("noteRows"); dl.textContent = "";
+    n.rows.forEach(function (row) {
+      var dt = document.createElement("dt"); dt.textContent = row[0];
+      var dd = document.createElement("dd"); var v = row[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else {
+        if (v.cap) { var pc = document.createElement("p"); pc.className = "sample-cap"; pc.textContent = v.cap; dd.appendChild(pc); }
+        var pre = document.createElement("pre"); pre.className = "sample"; pre.textContent = v.pre; dd.appendChild(pre);
+      }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    document.querySelectorAll("#" + P + "diagram [data-id]").forEach(function (g) { g.classList.toggle("sel", g.getAttribute("data-id") === selected); });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+
+  function show(i) {
+    cur = Math.max(0, Math.min(cfg.steps.length - 1, i));
+    var s = cfg.steps[cur];
+    s.on = s.on || []; s.hot = s.hot || [];
+    var root = $("draw"); root.textContent = "";
+    cfg.draw(api, root, s);
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + cfg.steps.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === cfg.steps.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash(cfg.key, cur + 1);
+  }
+  cfg.steps.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 步");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+  var lg = $("legend");
+  cfg.legend.forEach(function (it) {
+    var s = document.createElement("span");
+    var sw = document.createElement("i");
+    if (it[0] === "info") { sw.className = "icon"; sw.textContent = "i"; } else sw.className = "sw " + it[0];
+    s.appendChild(sw); s.appendChild(document.createTextNode(it[1])); lg.appendChild(s);
+  });
+  show(0);
+  window.__v = window.__v || {};
+  window.__v[cfg.key] = { show: show, cur: function () { return cur; } };
+}
+</script>
+<script>
+/* ===== 第 1 页：整体 ===== */
+(function () {
+  var LX = 30, LW = 420, RX = 530, RW = 420;
+  var LCX = LX + LW / 2, RCX = RX + RW / 2;
+  var Y = { tok: 40, emb: 130, layer: 230, encout: 370, head: 370, out: 470 };
+
+  /* s.dec：解码器输入里有几个 token；s.out：输出框里显示的 token；s.train：训练那一步 */
+  function draw(A, root, s) {
+    A.mk("text", { "class": "colhead", x: LX, y: 22 }, root, "编码器这一边：读原文（一句只运行一次）");
+    A.mk("text", { "class": "colhead", x: RX, y: 22 }, root, "解码器这一边：写译文（每写一个 token 运行一次）");
+
+    // 左列
+    var g = A.box(root, s, "src", LX, Y.tok, LW, 56, "原文 token", "", { cn: true });
+    var x = LX + 110;
+    ["我", "爱", "猫"].forEach(function (t) { x += A.chip(g, x, Y.tok + 15, t, s.on.indexOf("src") >= 0 ? "found" : "") + 8; });
+    A.box(root, s, "emb_e", LX, Y.emb, LW, 62, "Embedding + 位置编码", "每个 token 变成一行 d_model 个数", { cn: true });
+    A.box(root, s, "enc", LX, Y.layer, LW, 86, "编码器 × 6", "每层：多头自注意力 → 前馈网络", { cn: true, stack: true, proc: true });
+    var eg = A.box(root, s, "encout", LX, Y.encout, LW, 120, "编码器输出", "3 行向量，一行对应一个原文 token", { cn: true });
+    ["我", "爱", "猫"].forEach(function (t, i) {
+      A.mk("text", { "class": "glabel", x: LX + 30, y: Y.encout + 72 + i * 15 }, eg, t);
+      A.mk("rect", { x: LX + 50, y: Y.encout + 62 + i * 15, width: 200, height: 11, rx: 3, fill: "var(--accent)", "fill-opacity": 0.25 + i * 0.15 }, eg);
+    });
+
+    // 右列
+    var tg = A.box(root, s, "tgt", RX, Y.tok, RW, 56, "解码器输入", "", { cn: true });
+    var tk = ["<bos>", "I", "love", "cats"];
+    x = RX + 110;
+    tk.forEach(function (t, i) {
+      var kind = i < s.dec ? (i === s.dec - 1 && s.newIn ? "new" : "found") : "empty";
+      x += A.chip(tg, x, Y.tok + 15, i < s.dec ? t : " ", s.on.indexOf("tgt") >= 0 ? kind : (i < s.dec ? "" : "empty")) + 8;
+    });
+    A.box(root, s, "emb_d", RX, Y.emb, RW, 62, "Embedding + 位置编码", "已写出的每个 token 变成一行 d_model 个数", { cn: true });
+    A.box(root, s, "dec", RX, Y.layer, RW, 86, "解码器 × 6", "每层：掩码多头自注意力 → 多头交叉注意力 → 前馈网络", { cn: true, stack: true, proc: true });
+    A.box(root, s, "head", RX, Y.head, RW, 62, "Linear + Softmax", s.train ? "每一行 → 词表里每个 token 的概率" : "最后一行 → 词表里每个 token 的概率", { cn: true });
+    var og = A.box(root, s, "out", RX, Y.out, RW, 56, s.train ? "每个位置的答案" : "下一个 token", "", { cn: true });
+    x = RX + 140;
+    (s.out || []).forEach(function (t) { x += A.chip(og, x, Y.out + 15, t, s.on.indexOf("out") >= 0 ? "new" : "") + 8; });
+
+    // 箭头
+    var a = s.arrows || [];
+    if (a.indexOf("e1") >= 0) A.arrow(root, "M" + LCX + " " + (Y.tok + 58) + " V" + (Y.emb - 4));
+    if (a.indexOf("e2") >= 0) A.arrow(root, "M" + LCX + " " + (Y.emb + 64) + " V" + (Y.layer - 14));
+    if (a.indexOf("e3") >= 0) A.arrow(root, "M" + LCX + " " + (Y.layer + 88) + " V" + (Y.encout - 4));
+    if (a.indexOf("x") >= 0) {
+      A.arrow(root, "M" + (LX + LW + 2) + " " + (Y.encout + 60) + " H490 V" + (Y.layer + 50) + " H" + (RX - 4), "warm");
+      A.label(root, 498, Y.layer + 120, "K、V", "warm");
+    }
+    if (a.indexOf("d1") >= 0) A.arrow(root, "M" + RCX + " " + (Y.tok + 58) + " V" + (Y.emb - 4));
+    if (a.indexOf("d2") >= 0) A.arrow(root, "M" + RCX + " " + (Y.emb + 64) + " V" + (Y.layer - 14));
+    if (a.indexOf("d3") >= 0) A.arrow(root, "M" + RCX + " " + (Y.layer + 88) + " V" + (Y.head - 4));
+    if (a.indexOf("d4") >= 0) A.arrow(root, "M" + RCX + " " + (Y.head + 64) + " V" + (Y.out - 4));
+    if (a.indexOf("loop") >= 0) {
+      A.arrow(root, "M" + (RX + RW + 2) + " " + (Y.out + 28) + " H978 V" + (Y.tok + 28) + " H" + (RX + RW + 4), "back");
+      A.label(root, 972, Y.out - 160, "接到输入后面", "muted", "end");
+    }
+  }
+
+  var STEPS = [
+    { on: ["src"], hot: ["src"], dec: 0,
+      say: "例子任务是把中文“我爱猫”翻译成英文“I love cats”。分词器先把原文切成 3 个 token：我、爱、猫。",
+      code: "src = [\"我\", \"爱\", \"猫\"]   # 3 个 token，每个 token 在词表里有一个编号" },
+    { on: ["src", "emb_e"], hot: ["emb_e"], arrows: ["e1"], dec: 0,
+      say: "Embedding 层给每个 token 查出一行向量，位置编码再给每一行加上一组表示“排在第几个”的数。原文变成 3 行向量，每行 d_model 个数（论文里 d_model 是 512）。",
+      code: "x = embed(src_ids) * math.sqrt(d_model) + pe[:3]   # 形状 [3, 512]" },
+    { on: ["src", "emb_e", "enc"], hot: ["enc"], arrows: ["e1", "e2"], dec: 0,
+      say: "编码器把这 3 行向量依次送进 6 个编码器层。每个编码器层先用多头自注意力让每个 token 读取另外两个 token 的信息，再用前馈网络把每一行单独加工一遍。进去 3 行，出来还是 3 行，每行长度不变。",
+      code: "for layer in encoder_layers:   # 6 层\n    x = layer(x)                # [3, 512] → [3, 512]" },
+    { on: ["src", "emb_e", "enc", "encout"], hot: ["encout"], arrows: ["e1", "e2", "e3"], dec: 0,
+      say: "最后一个编码器层的输出就是编码器输出：还是 3 行，但“猫”那一行已经带上了“我”和“爱”的信息。编码器对一句原文只运行这一次，解码器后面每一轮都读这同一份编码器输出。",
+      code: "enc_out = x   # [3, 512]，解码器每一轮都复用" },
+    { on: ["encout", "tgt", "emb_d", "dec", "head", "out"], hot: ["dec", "out"], arrows: ["x", "d1", "d2", "d3", "d4"], dec: 1, newIn: true, out: ["I"],
+      say: "解码器开始写译文。第 1 轮，解码器输入只有开始符 <bos>。<bos> 变成向量后经过 6 个解码器层，每个解码器层用交叉注意力读取编码器输出。Linear + Softmax 把最后一行变成词表里每个 token 的概率，概率最大的是 I。",
+      code: "dec_in = [\"<bos>\"]\nh = decoder(embed(dec_in) * math.sqrt(d_model) + pe[:1], enc_out)\nprobs = softmax(linear(h[-1]))   # 只用最后一行\nnext_token = vocab[probs.argmax()]   # → \"I\"" },
+    { on: ["encout", "tgt", "emb_d", "dec", "head", "out"], hot: ["tgt", "out"], arrows: ["x", "d1", "d2", "d3", "d4", "loop"], dec: 2, newIn: true, out: ["love"],
+      say: "解码器把上一轮写出的 I 接到输入后面，第 2 轮的输入是 <bos> I。解码器再完整运行一遍，最后一行给出的概率最大的是 love。",
+      code: "dec_in = [\"<bos>\", \"I\"]   # 上一轮的输出接到后面\nnext_token = ...   # → \"love\"" },
+    { on: ["encout", "tgt", "emb_d", "dec", "head", "out"], hot: ["tgt", "out"], arrows: ["x", "d1", "d2", "d3", "d4", "loop"], dec: 3, newIn: true, out: ["cats"],
+      say: "第 3 轮的输入是 <bos> I love，输出是 cats。“解码器一层”那一页逐步算的就是这一轮。",
+      code: "dec_in = [\"<bos>\", \"I\", \"love\"]\nnext_token = ...   # → \"cats\"" },
+    { on: ["encout", "tgt", "emb_d", "dec", "head", "out"], hot: ["out"], arrows: ["x", "d1", "d2", "d3", "d4", "loop"], dec: 4, newIn: true, out: ["<eos>"],
+      say: "第 4 轮的输入是 <bos> I love cats，概率最大的是结束符 <eos>。解码器写出 <eos> 就停下，译文是 I love cats。",
+      code: "while next_token != \"<eos>\":\n    dec_in.append(next_token)\n    next_token = ...   # 每一轮把解码器完整运行一遍" },
+    { on: ["src", "emb_e", "enc", "encout", "tgt", "emb_d", "dec", "head", "out"], hot: ["tgt", "out"], arrows: ["e1", "e2", "e3", "x", "d1", "d2", "d3", "d4"], dec: 4, train: true, out: ["I", "love", "cats", "<eos>"],
+      say: "训练时解码器不一轮一轮地写。解码器输入是正确译文整体往右移一位：<bos> I love cats；每个位置的答案是它后面的那个 token：I、love、cats、<eos>。4 个位置在一次运行里同时算出概率，掩码自注意力挡住每个位置后面的 token，所以每个位置看不到自己的答案。",
+      code: "dec_in = [\"<bos>\", \"I\", \"love\", \"cats\"]\ntarget = [\"I\", \"love\", \"cats\", \"<eos>\"]\nloss = cross_entropy(logits, target)   # 4 个位置一起算" }
+  ];
+
+  function embRows(tokens, emb, pe, out) {
+    return tokens.map(function (t, i) { return t + "：Embedding × 2 = " + vec(emb[i]) + "\n    位置编码 = " + vec(pe[i]) + "\n    相加 = " + vec(out[i]); }).join("\n");
+  }
+
+  var NOTES = {
+    src: { title: "原文 token", rows: [
+      ["是什么", "分词器把原文“我爱猫”切成的 3 个 token。每个 token 在原文词表里有一个编号，模型拿到的是这些编号。"],
+      ["输出", "3 个 token 编号，送进 Embedding。"] ] },
+    emb_e: { title: "Embedding + 位置编码（编码器这一边）", rows: [
+      ["是什么", "Embedding 是一张表，每个 token 编号对应表里一行 d_model 个数。位置编码按位置 pos 算出一行 sin、cos 值，加到这一行上，让模型知道每个 token 排在第几个。"],
+      ["输入", "3 个 token 编号。"],
+      ["输出", "3 行向量，形状 [3, d_model]。"],
+      ["论文里的设置", "d_model = 512。Embedding 查出的数先乘以 √d_model，再加位置编码。位置编码：PE(pos, 2i) = sin(pos / 10000^(2i/d_model))，PE(pos, 2i+1) = cos(pos / 10000^(2i/d_model))。"],
+      ["例子", { cap: "例子里 d_model = 4，√4 = 2。权重是随机取的小数，没有训练过：", pre: embRows(["我", "爱", "猫"], D.embS, D.PEs, D.X) }] ] },
+    enc: { title: "编码器 × 6", rows: [
+      ["是什么", "6 个结构相同、权重各自独立的编码器层。前一层的输出是后一层的输入。"],
+      ["每层里面", "两个子层：多头自注意力、前馈网络。每个子层后面接一个 Add & Norm。"],
+      ["输入、输出", "输入 [3, d_model]，输出 [3, d_model]，行数和每行长度都不变。"],
+      ["逐步计算", "“编码器一层”那一页用例子的数字算了一层。"] ] },
+    encout: { title: "编码器输出", rows: [
+      ["是什么", "最后一个编码器层输出的 3 行向量，一行对应一个原文 token。"],
+      ["谁读它", "6 个解码器层里的多头交叉注意力都读它，用它算 K 和 V。"],
+      ["算几次", "一句原文只算一次。解码器每一轮都复用这一份。"] ] },
+    tgt: { title: "解码器输入", rows: [
+      ["是什么", "已经写出的译文 token，最前面放一个开始符 <bos>。"],
+      ["怎么变", "每一轮把上一轮写出的 token 接到最后：第 1 轮是 <bos>，第 2 轮是 <bos> I，第 3 轮是 <bos> I love，第 4 轮是 <bos> I love cats。"],
+      ["训练时", "直接放入正确译文整体右移一位的结果：<bos> I love cats。"] ] },
+    emb_d: { title: "Embedding + 位置编码（解码器这一边）", rows: [
+      ["是什么", "做法和编码器这一边相同：查表得到一行向量，乘以 √d_model，再加位置编码。"],
+      ["输入、输出", "输入是解码器输入里的 token 编号，输出 [token 个数, d_model]。"],
+      ["论文里的设置", "论文里两边的 Embedding 和最后的 Linear 共用同一张权重表（英德翻译用的是两种语言共享的词表）。"] ] },
+    dec: { title: "解码器 × 6", rows: [
+      ["是什么", "6 个结构相同、权重各自独立的解码器层。前一层的输出是后一层的输入。"],
+      ["每层里面", "三个子层：掩码多头自注意力、多头交叉注意力、前馈网络。每个子层后面接一个 Add & Norm。"],
+      ["输入、输出", "输入 [token 个数, d_model] 和编码器输出，输出 [token 个数, d_model]。"],
+      ["逐步计算", "“解码器一层”那一页用例子的数字算了第 3 轮的一层。"] ] },
+    head: { title: "Linear + Softmax", rows: [
+      ["是什么", "Linear 把一行 d_model 个数变成词表里每个 token 一个分数；Softmax 把这些分数变成加起来等于 1 的概率。"],
+      ["用哪一行", "生成时只用最后一行，它对应要写的下一个位置。训练时每一行都用，每行预测一个位置的答案。"] ] },
+    out: { title: "下一个 token", rows: [
+      ["是什么", "概率最大的那个 token。例子 4 轮依次写出 I、love、cats、<eos>。"],
+      ["何时停", "写出 <eos> 时停止。"],
+      ["论文里的设置", "论文翻译时用的是束搜索（beam size 4），每一轮保留 4 个候选译文；这里用最简单的做法：每轮取概率最大的那一个。"] ] }
+  };
+
+  makeView({ P: "o-", key: "overview", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hot", "这一步讲到的部分"], ["new", "这一步新写出的 token"], ["info", "点框看说明"]] });
+})();
+
+/* ===== 第 2 页：注意力怎么算（编码器第 1 层的多头自注意力） ===== */
+(function () {
+  var H1 = D.att[0], H2 = D.att[1];
+  var TOK = ["我", "爱", "猫"];
+  var R1 = 30, R2 = 210, R3 = 410;
+
+  function has(s, k) { return s.show.indexOf(k) >= 0; }
+  function draw(A, root, s) {
+    var hr = s.hiRow;
+    if (has(s, "X")) A.grid(root, 60, R1, D.X, { id: "X", title: "X：输入", rows: TOK, hiRow: s.hiX });
+    if (has(s, "QKV")) {
+      A.grid(root, 420, R1, H1.Q, { id: "Q", title: "Q = X · W_Q", rows: TOK, cw: 60, hiRow: hr });
+      A.grid(root, 590, R1, H1.K, { id: "K", title: "K = X · W_K", cw: 60, hiAll: s.hiK });
+      A.grid(root, 760, R1, H1.V, { id: "V", title: "V = X · W_V", cw: 60, hiAll: s.hiV });
+      A.arrow(root, "M272 94 H388");
+      A.label(root, 330, 86, "× W", "", "middle");
+      A.label(root, 700, 166, "第 1 个头：每行 2 个数（d_k = 2）", "muted");
+    }
+    if (has(s, "scores")) {
+      A.arrow(root, "M480 140 V182 H150 V202"); A.arrow(root, "M650 140 V182 H480", "");
+      A.grid(root, 60, R2, H1.scores, { id: "scores", title: "注意力分数 Q · Kᵀ", rows: TOK, cols: TOK, cw: 60, hiRow: hr });
+    }
+    if (has(s, "scaled")) {
+      A.arrow(root, "M244 292 H312"); A.label(root, 278, 284, "÷ √2", "", "middle");
+      A.grid(root, 320, R2, H1.scaled, { id: "scaled", title: "除以 √d_k", cols: TOK, cw: 60, hiRow: hr });
+    }
+    if (has(s, "weights")) {
+      A.arrow(root, "M504 292 H572"); A.label(root, 538, 284, "softmax", "", "middle");
+      A.grid(root, 580, R2, H1.weights, { id: "weights", title: "注意力权重", cols: TOK, cw: 60, hiRow: hr, heat: true });
+    }
+    if (has(s, "out")) {
+      A.arrow(root, "M764 292 H822"); A.label(root, 793, 284, "× V", "", "middle");
+      A.grid(root, 830, R2, H1.out, { id: "out", title: "第 1 个头的输出", cw: 60, hiRow: hr });
+    }
+    if (has(s, "heads")) {
+      A.arrow(root, "M890 342 V382 H110 V402");
+      A.grid(root, 60, R3, H1.out, { id: "h1", title: "第 1 个头", rows: TOK, cw: 52 });
+      A.grid(root, 236, R3, H2.out, { id: "h2", title: "第 2 个头", cw: 52 });
+      A.arrow(root, "M344 474 H432"); A.label(root, 388, 466, "左右拼起来", "muted", "middle");
+      A.grid(root, 440, R3, D.cat, { id: "cat", title: "拼起来：每行 4 个数", cw: 52 });
+    }
+    if (has(s, "A")) {
+      A.arrow(root, "M652 474 H732"); A.label(root, 692, 466, "× W_O", "", "middle");
+      A.grid(root, 740, R3, D.A, { id: "A", title: "A：多头自注意力的输出", cw: 52, hiRow: hr });
+    }
+  }
+
+  var c = H1;
+  var STEPS = [
+    { show: ["X"], hiX: 2,
+      say: "这一页拿编码器第 1 层的多头自注意力当例子，跟着看“猫”那一行。输入 X 是 3 行向量，一行对应一个原文 token；例子里 d_model 是 4，所以每行 4 个数。例子的权重是随机取的小数，没有训练过；表里的数都四舍五入到两位小数。",
+      code: "X = embed(src_ids) * math.sqrt(4) + pe[:3]   # [3, 4]" },
+    { show: ["X", "QKV"], hiRow: 2,
+      say: "X 分别乘以三个权重矩阵 W_Q、W_K、W_V，得到 Q、K、V。这里先只看第 1 个头：它用三个矩阵的前 2 列，所以 Q、K、V 每行 2 个数（d_k = 2）。猫的 Q 是 " + vec(c.Q[2]) + "。",
+      code: "Q = X @ W_Q[:, :2]   # [3, 2]\nK = X @ W_K[:, :2]   # [3, 2]\nV = X @ W_V[:, :2]   # [3, 2]" },
+    { show: ["X", "QKV", "scores"], hiRow: 2, hiK: true,
+      say: "Q 的每一行和 K 的每一行做点积，得到 3 × 3 的注意力分数。猫的 Q " + vec(c.Q[2]) + " 和我、爱、猫的 K 做点积，分别是 " + c.scores[2].map(fmt).join("、") + "。",
+      code: "scores = Q @ K.T   # [3, 3]，第 i 行第 j 列 = 第 i 个 token 的 Q · 第 j 个 token 的 K" },
+    { show: ["X", "QKV", "scores", "scaled"], hiRow: 2,
+      say: "注意力分数再除以 √d_k = √2 ≈ 1.41，猫那一行变成 " + c.scaled[2].map(fmt).join("、") + "。论文里 d_k 是 64，分数除以 8；不除的话，分数太大时 softmax 几乎把全部权重给一个位置，梯度会变得很小。",
+      code: "scores = scores / math.sqrt(d_k)   # d_k = 2" },
+    { show: ["X", "QKV", "scores", "scaled", "weights"], hiRow: 2,
+      say: "softmax 把每一行变成加起来等于 1 的注意力权重。猫那一行是 " + c.weights[2].map(fmt).join("、") + "：猫的新向量 " + Math.round(c.weights[2][0] * 100) + "% 取自我，" + Math.round(c.weights[2][1] * 100) + "% 取自爱，" + Math.round(c.weights[2][2] * 100) + "% 取自猫自己。",
+      code: "weights = torch.softmax(scores, dim=-1)   # 每行：先取 e 的幂，再除以这一行的总和" },
+    { show: ["X", "QKV", "scores", "scaled", "weights", "out"], hiRow: 2, hiV: true,
+      say: "注意力权重乘以 V：每个 token 的输出是 3 行 V 按自己那一行的权重加起来。猫的输出 = " + fmt(c.weights[2][0]) + " × 我的 V + " + fmt(c.weights[2][1]) + " × 爱的 V + " + fmt(c.weights[2][2]) + " × 猫的 V ≈ " + vec(c.out[2]) + "。",
+      code: "head1 = weights @ V   # [3, 3] @ [3, 2] → [3, 2]\n# 合起来就是论文的公式：Attention(Q, K, V) = softmax(Q·Kᵀ / √d_k) · V" },
+    { show: ["X", "QKV", "scores", "scaled", "weights", "out", "heads"],
+      say: "第 2 个头用 W_Q、W_K、W_V 的后 2 列，按同样的步骤算出自己的输出。两个头的输出左右拼起来，每行又是 4 个数。两个头各用一套权重，所以同一个 token 可以按两种不同的权重去取别的 token 的信息。",
+      code: "head2 = attention(X @ W_Q[:, 2:], X @ W_K[:, 2:], X @ W_V[:, 2:])   # [3, 2]\nconcat = torch.cat([head1, head2], dim=-1)   # [3, 4]" },
+    { show: ["X", "QKV", "scores", "scaled", "weights", "out", "heads", "A"], hiRow: 2,
+      say: "拼好的结果再乘以 W_O，得到多头自注意力的输出 A。A 和 X 一样是 3 行 4 列，“编码器一层”那一页接着用它。论文里有 8 个头，每个头 d_k = 64，8 × 64 = 512，拼起来正好等于 d_model。",
+      code: "A = concat @ W_O   # [3, 4] @ [4, 4] → [3, 4]" }
+  ];
+
+  function mat(M) { return M.map(function (r) { return r.map(fmt).map(function (t) { return ("      " + t).slice(-6); }).join(" "); }).join("\n"); }
+  var NOTES = {
+    X: { title: "X：输入", rows: [
+      ["是什么", "多头自注意力的输入：3 行向量，一行对应一个原文 token。这里是 Embedding × 2 加上位置编码的结果。"],
+      ["形状", "例子 [3, 4]；论文 [句子的 token 个数, 512]。"] ] },
+    Q: { title: "Q（Query）", rows: [
+      ["是什么", "每个 token 的 Q 拿去和每个 token 的 K 做点积，结果决定这个 token 从谁那里取信息。"],
+      ["怎么算", "X 乘以 W_Q 的前 2 列（第 1 个头用的那一部分）。"],
+      ["例子", { cap: "第 1 个头的 W_Q（4 行 2 列）：", pre: mat(col(D.W.Q, 0, 2)) }] ] },
+    K: { title: "K（Key）", rows: [
+      ["是什么", "每个 token 的 K 被每个 token 的 Q 拿来做点积。"],
+      ["怎么算", "X 乘以 W_K 的前 2 列。"],
+      ["例子", { cap: "第 1 个头的 W_K（4 行 2 列）：", pre: mat(col(D.W.K, 0, 2)) }] ] },
+    V: { title: "V（Value）", rows: [
+      ["是什么", "每个 token 的 V 是它被别的 token 取走的信息。注意力权重决定每个 token 取走多少。"],
+      ["怎么算", "X 乘以 W_V 的前 2 列。"],
+      ["例子", { cap: "第 1 个头的 W_V（4 行 2 列）：", pre: mat(col(D.W.V, 0, 2)) }] ] },
+    scores: { title: "注意力分数", rows: [
+      ["是什么", "第 i 行第 j 列 = 第 i 个 token 的 Q 和第 j 个 token 的 K 的点积。点积越大，第 i 个 token 从第 j 个 token 取的信息越多。"],
+      ["形状", "[3, 3]：行是取信息的 token，列是被取信息的 token。"] ] },
+    scaled: { title: "除以 √d_k", rows: [
+      ["是什么", "注意力分数除以 √d_k。例子 d_k = 2，除以 1.41；论文 d_k = 64，除以 8。"],
+      ["为什么", "d_k 越大，点积的数值越大。数值太大时 softmax 几乎把全部权重给一个位置，梯度变得很小，模型难训练。"] ] },
+    weights: { title: "注意力权重", rows: [
+      ["是什么", "对注意力分数的每一行做 softmax 的结果。每行 3 个数都在 0 到 1 之间，加起来等于 1。"],
+      ["怎么算", "每个数先取 e 的幂，再除以这一行 3 个幂的总和。"],
+      ["颜色", "格子的蓝色越深，权重越大。"] ] },
+    out: { title: "第 1 个头的输出", rows: [
+      ["是什么", "注意力权重乘以 V。第 i 行 = 第 i 行的 3 个权重分别乘以 3 行 V，再加起来。"],
+      ["论文的公式", "Attention(Q, K, V) = softmax(Q·Kᵀ / √d_k) · V"] ] },
+    h1: { title: "第 1 个头", rows: [["是什么", "上一行算出来的第 1 个头的输出，形状 [3, 2]。"]] },
+    h2: { title: "第 2 个头", rows: [
+      ["是什么", "第 2 个头的输出，形状 [3, 2]。"],
+      ["怎么算", "和第 1 个头步骤相同，只是用 W_Q、W_K、W_V 的后 2 列。"],
+      ["例子", { cap: "第 2 个头的注意力权重（行和列都是我、爱、猫）：", pre: mat(H2.weights) }] ] },
+    cat: { title: "两个头拼起来", rows: [
+      ["是什么", "第 1 个头的 2 列放左边，第 2 个头的 2 列放右边，每行 4 个数。"],
+      ["论文里的设置", "8 个头，每个头 64 列，拼起来 512 列。"] ] },
+    A: { title: "A：多头自注意力的输出", rows: [
+      ["是什么", "拼起来的结果乘以 W_O（4 行 4 列）。形状和 X 相同，[3, 4]。"],
+      ["下一步", "编码器层把 A 加到 X 上，再做层归一化（Add & Norm）。"],
+      ["例子", { cap: "W_O（4 行 4 列）：", pre: mat(D.W.O) }] ] }
+  };
+
+  makeView({ P: "a-", key: "attention", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hi", "这一步跟着看的数"], ["heat", "注意力权重：越深越大"], ["info", "点网格看说明"]] });
+})();
+
+/* 右边一列网格：从上往下排；{op: "+"} 是两个网格之间的运算符 */
+function stackGrids(A, root, items, x, y) {
+  items.forEach(function (it) {
+    if (it.op) { A.mk("text", { "class": "op", x: x + 4, y: y + 16 }, root, it.op); if (it.opText) A.mk("text", { "class": "sub", x: x + 26, y: y + 14 }, root, it.opText); y += 26; return; }
+    var r = A.grid(root, x, y, it.M, it);
+    y = r.bottom + 10;
+  });
+}
+
+/* ===== 第 3 页：编码器一层 ===== */
+(function () {
+  var TOK = ["我", "爱", "猫"];
+  var BX = 70, BW = 290, BH = 52, CX = BX + BW / 2;
+  var BY = { in: 20, attn: 100, an1: 180, ffn: 260, an2: 340, out: 420 };
+  var GX = 480, GY = 20;
+
+  function draw(A, root, s) {
+    A.box(root, s, "in", BX, BY.in, BW, BH, "输入 X", "3 行 × d_model", { cn: true });
+    A.box(root, s, "attn", BX, BY.attn, BW, BH, "多头自注意力", "Q、K、V 都来自 X", { cn: true, proc: true });
+    A.box(root, s, "an1", BX, BY.an1, BW, BH, "Add & Norm", "残差连接 + 层归一化", { cn: true });
+    A.box(root, s, "ffn", BX, BY.ffn, BW, BH, "前馈网络", "每一行单独加工：4 → 8 → 4", { cn: true, proc: true });
+    A.box(root, s, "an2", BX, BY.an2, BW, BH, "Add & Norm", "残差连接 + 层归一化", { cn: true });
+    A.box(root, s, "out", BX, BY.out, BW, BH, "编码器层的输出", "3 行 × d_model，送进下一层", { cn: true });
+    ["in", "attn", "an1", "ffn", "an2"].forEach(function (k, i) {
+      var nk = ["attn", "an1", "ffn", "an2", "out"][i];
+      if (s.on.indexOf(nk) >= 0) A.arrow(root, "M" + CX + " " + (BY[k] + BH + 2) + " V" + (BY[nk] - 4));
+    });
+    if (s.res1) { A.arrow(root, "M" + (BX - 2) + " " + (BY.in + 26) + " H44 V" + (BY.an1 + 18) + " H" + (BX - 4), "warm"); }
+    if (s.res2) { A.arrow(root, "M" + (BX - 2) + " " + (BY.an1 + 34) + " H28 V" + (BY.an2 + 18) + " H" + (BX - 4), "warm"); }
+    if (s.res1 || s.res2) A.label(root, 20, 500, "黄色箭头：残差连接", "warm");
+    stackGrids(A, root, s.grids || [], GX, GY);
+  }
+
+  var o = function (M, title, extra) { var r = { M: M, title: title, rows: TOK }; for (var k in extra || {}) r[k] = extra[k]; return r; };
+  var STEPS = [
+    { on: ["in"], hot: ["in"], grids: [o(D.X, "X")],
+      say: "编码器层的输入是 3 行向量 X，一行对应一个原文 token，每行 4 个数（论文里每行 512 个数）。第 1 个编码器层的 X 来自 Embedding 加位置编码；后面每层的 X 是上一层的输出。",
+      code: "x = X   # [3, 4]" },
+    { on: ["in", "attn"], hot: ["attn"], grids: [o(D.X, "X"), { op: "↓", opText: "多头自注意力" }, o(D.A, "A")],
+      say: "多头自注意力用 X 算出 A，就是“注意力怎么算”那一页最后一步的结果。A 的每一行已经按注意力权重混进了 3 个 token 的信息。",
+      code: "a = self_attn(q=x, k=x, v=x)   # Q、K、V 都来自同一个 x → [3, 4]" },
+    { on: ["in", "attn", "an1"], hot: ["an1"], res1: true, grids: [o(D.X, "X", { hiRow: 2 }), { op: "+" }, o(D.A, "A", { hiRow: 2 }), { op: "=" }, o(D.S1, "X + A", { hiRow: 2 })],
+      say: "Add & Norm 先做残差连接：把子层的输入 X 和子层的输出 A 逐个位置相加。猫那一行 " + vec(D.X[2]) + " + " + vec(D.A[2]) + " = " + vec(D.S1[2]) + "。残差连接让 X 原来的信息直接传到后面，层数多了也容易训练。",
+      code: "x + a   # 形状不变，[3, 4]" },
+    { on: ["in", "attn", "an1"], hot: ["an1"], res1: true, grids: [o(D.S1, "X + A", { hiRow: 2 }), { op: "↓", opText: "层归一化：每一行单独调" }, o(D.N1, "层归一化之后", { hiRow: 2 })],
+      say: "然后做层归一化：每一行单独减去这一行的平均数，再除以这一行的标准差，调完每行平均数是 0、标准差是 1。猫那一行的平均数是 " + (D.S1[2].reduce(function (a, b) { return a + b; }, 0) / 4).toFixed(3) + "，调完是 " + vec(D.N1[2]) + "。",
+      code: "x = layer_norm(x + a)   # 每行：(x − 平均数) / 标准差" },
+    { on: ["in", "attn", "an1", "ffn"], hot: ["ffn"], res1: true, grids: [o(D.N1, "前馈网络的输入"), { op: "↓", opText: "× W1 + b1：4 个数变 8 个数" }, o(D.Fpre, "第一次线性变换", { cw: 52, hiRow: 2 }), { op: "↓", opText: "ReLU：负数换成 0" }, o(D.Fh, "ReLU 之后", { cw: 52, hiRow: 2, zero: true })],
+      say: "前馈网络对每一行单独做两次线性变换。第一次把每行 4 个数变成 8 个数（论文里 512 变成 2048），再用 ReLU 把负数换成 0。猫那一行的 8 个数里有 4 个负数，ReLU 之后变成 0。",
+      code: "h = torch.relu(x @ W1 + b1)   # [3, 4] → [3, 8]" },
+    { on: ["in", "attn", "an1", "ffn"], hot: ["ffn"], res1: true, grids: [o(D.Fh, "ReLU 之后", { cw: 52, zero: true }), { op: "↓", opText: "× W2 + b2：8 个数变回 4 个数" }, o(D.Fo, "前馈网络的输出 F")],
+      say: "第二次线性变换把每行 8 个数变回 4 个数。前馈网络里每一行只用自己的数，3 个 token 之间不交换信息；token 之间交换信息只发生在多头自注意力里。",
+      code: "f = h @ W2 + b2   # [3, 8] → [3, 4]" },
+    { on: ["in", "attn", "an1", "ffn", "an2"], hot: ["an2"], res1: true, res2: true, grids: [o(D.N1, "前馈网络的输入"), { op: "+" }, o(D.Fo, "F"), { op: "↓", opText: "相加，再做层归一化" }, o(D.Enc, "第二个 Add & Norm 之后")],
+      say: "第二个 Add & Norm 和第一个做法相同：先把前馈网络的输入加到前馈网络的输出 F 上，再对每一行做层归一化。",
+      code: "x = layer_norm(x + f)   # [3, 4]" },
+    { on: ["in", "attn", "an1", "ffn", "an2", "out"], hot: ["out"], res1: true, res2: true, grids: [o(D.Enc, "编码器层的输出")],
+      say: "编码器层的输出还是 3 行 4 列，和输入 X 形状相同，所以 6 个编码器层可以一个接一个地叠起来。例子只有 1 层，这一层的输出就是编码器输出，解码器的多头交叉注意力读的就是它。",
+      code: "for layer in encoder_layers:   # 论文 6 层，例子 1 层\n    x = layer(x)\nenc_out = x   # [3, 4]" }
+  ];
+
+  var NOTES = {
+    in: { title: "输入 X", rows: [
+      ["是什么", "3 行向量，一行对应一个原文 token。"],
+      ["从哪来", "第 1 个编码器层：Embedding × √d_model 加位置编码。第 2 到第 6 层：上一层的输出。"],
+      ["形状", "例子 [3, 4]；论文 [token 个数, 512]。"] ] },
+    attn: { title: "多头自注意力", rows: [
+      ["是什么", "每个 token 按注意力权重从 3 个 token（包括自己）的 V 里取信息。“自”的意思是 Q、K、V 都来自同一个 X。"],
+      ["输入、输出", "输入 X [3, 4]，输出 A [3, 4]。"],
+      ["逐步计算", "“注意力怎么算”那一页。"],
+      ["论文里的设置", "8 个头，每个头 d_k = d_v = 64。"] ] },
+    an1: { title: "Add & Norm（第一个）", rows: [
+      ["是什么", "两步：残差连接把子层的输入 X 加到子层的输出 A 上；层归一化把每一行调成平均数 0、标准差 1。"],
+      ["论文的写法", "LayerNorm(x + Sublayer(x))。论文还在加之前对子层的输出做 dropout（训练时随机把一部分数置 0，比例 0.1）。"],
+      ["层归一化的参数", "真实的层归一化调完之后还会乘一个可学习的 γ、加一个可学习的 β；例子取 γ = 1、β = 0。"] ] },
+    ffn: { title: "前馈网络", rows: [
+      ["是什么", "两次线性变换，中间夹一个 ReLU。每一行单独算，3 行用同一套权重。"],
+      ["论文的公式", "FFN(x) = max(0, x·W1 + b1)·W2 + b2"],
+      ["形状", "例子 4 → 8 → 4；论文 512 → 2048 → 512。"] ] },
+    an2: { title: "Add & Norm（第二个）", rows: [
+      ["是什么", "和第一个相同：前馈网络的输入加到前馈网络的输出上，再做层归一化。"] ] },
+    out: { title: "编码器层的输出", rows: [
+      ["是什么", "3 行向量，形状和输入 X 相同。"],
+      ["去哪", "送进下一个编码器层。最后一个编码器层的输出就是编码器输出，6 个解码器层的多头交叉注意力都读它。"] ] }
+  };
+
+  makeView({ P: "e-", key: "encoder", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hot", "这一步讲到的子层"], ["hi", "跟着看的“猫”那一行"], ["info", "点框看说明"]] });
+})();
+
+/* ===== 第 4 页：解码器一层（第 3 轮：输入 <bos> I love） ===== */
+(function () {
+  var TOK = ["<bos>", "I", "love"], SRC = ["我", "爱", "猫"];
+  var VOCAB = ["<bos>", "<eos>", "I", "love", "cats", "dogs"];
+  var BX = 210, BW = 280, BH = 48, CX = BX + BW / 2;
+  var ORDER = ["in", "mattn", "an1", "cattn", "an2", "ffn", "an3", "lin", "out"];
+  var BY = {}; ORDER.forEach(function (k, i) { BY[k] = 20 + i * 74; });
+  var GX = 590, GY = 20;
+  var M1 = D.mask[0], C1 = D.cross[0];
+
+  function draw(A, root, s) {
+    A.box(root, s, "in", BX, BY.in, BW, BH, "输入 Y", "<bos> I love → 3 行 × d_model", { cn: true });
+    A.box(root, s, "mattn", BX, BY.mattn, BW, BH, "掩码多头自注意力", "每个 token 只看自己和前面", { cn: true, proc: true });
+    A.box(root, s, "an1", BX, BY.an1, BW, BH, "Add & Norm", "残差连接 + 层归一化", { cn: true });
+    A.box(root, s, "cattn", BX, BY.cattn, BW, BH, "多头交叉注意力", "Q 来自上一步，K、V 来自编码器输出", { cn: true, proc: true });
+    A.box(root, s, "an2", BX, BY.an2, BW, BH, "Add & Norm", "残差连接 + 层归一化", { cn: true });
+    A.box(root, s, "ffn", BX, BY.ffn, BW, BH, "前馈网络", "每一行单独加工：4 → 8 → 4", { cn: true, proc: true });
+    A.box(root, s, "an3", BX, BY.an3, BW, BH, "Add & Norm", "残差连接 + 层归一化", { cn: true });
+    A.box(root, s, "lin", BX, BY.lin, BW, BH, "Linear + Softmax", "最后一行 → 词表里每个 token 的概率", { cn: true });
+    var og = A.box(root, s, "out", BX, BY.out, BW, BH, "下一个 token", "", { cn: true });
+    if (s.on.indexOf("out") >= 0) A.chip(og, BX + 140, BY.out + 11, "cats", "new");
+    A.box(root, s, "enc", 20, BY.cattn - 14, 150, 76, "编码器输出", "我 爱 猫 · 3 行", { cn: true });
+
+    ORDER.slice(0, -1).forEach(function (k, i) {
+      var nk = ORDER[i + 1];
+      if (s.on.indexOf(nk) >= 0) A.arrow(root, "M" + CX + " " + (BY[k] + BH + 2) + " V" + (BY[nk] - 4));
+    });
+    if (s.on.indexOf("cattn") >= 0) { A.arrow(root, "M172 " + (BY.cattn + 24) + " H" + (BX - 4), "warm"); A.label(root, 190, BY.cattn + 12, "K、V", "warm", "middle"); }
+    var r = s.res || 0;
+    var RX = BX + BW;
+    if (r >= 1) A.arrow(root, "M" + (RX + 2) + " " + (BY.in + 24) + " H512 V" + (BY.an1 + 16) + " H" + (RX + 4), "warm");
+    if (r >= 2) A.arrow(root, "M" + (RX + 2) + " " + (BY.an1 + 32) + " H526 V" + (BY.an2 + 16) + " H" + (RX + 4), "warm");
+    if (r >= 3) A.arrow(root, "M" + (RX + 2) + " " + (BY.an2 + 32) + " H512 V" + (BY.an3 + 16) + " H" + (RX + 4), "warm");
+    if (r >= 1) A.label(root, 20, BY.out + 30, "黄色箭头：残差连接", "warm");
+    stackGrids(A, root, s.grids || [], GX, GY);
+    if (s.bars) {
+      var y = GY + (s.barsY || 0);
+      A.mk("text", { "class": "gtitle", x: GX - 50, y: y + 13 }, root, "词表里 6 个 token：分数 → 概率");
+      y += 30;
+      var last = D.logits[2], p = D.probs[2];
+      VOCAB.forEach(function (t, i) {
+        var win = i === 4;
+        A.mk("text", { "class": "glabel", x: GX - 8, y: y + 15, "text-anchor": "end" }, root, t);
+        A.mk("text", { "class": "glabel", x: GX + 4, y: y + 15 }, root, fmt(last[i]));
+        A.mk("rect", { "class": "bar" + (win ? " win" : ""), x: GX + 60, y: y + 3, width: Math.max(2, p[i] * 260), height: 16, rx: 3 }, root);
+        A.mk("text", { "class": "glabel", x: GX + 66 + Math.max(2, p[i] * 260), y: y + 15 }, root, fmt(p[i]));
+        y += 26;
+      });
+    }
+  }
+
+  var o = function (M, title, extra) { var r = { M: M, title: title, rows: TOK }; for (var k in extra || {}) r[k] = extra[k]; return r; };
+  var STEPS = [
+    { on: ["in"], hot: ["in"], grids: [o(D.Y, "Y")],
+      say: "这一页逐步算“整体”那一页的第 3 轮：解码器输入是 <bos> I love，要写出下一个 token。3 个 token 和原文一样，经过 Embedding 和位置编码变成 3 行向量 Y。数字来自同一个只有 1 层、d_model = 4 的例子，权重是随机取的小数。",
+      code: "y = embed([\"<bos>\", \"I\", \"love\"]) * math.sqrt(4) + pe[:3]   # [3, 4]" },
+    { on: ["in", "mattn"], hot: ["mattn"], grids: [o(D.Y, "Y"), { op: "↓", opText: "Q·Kᵀ / √d_k，再盖上掩码（第 1 个头）" }, o(M1.scaled, "盖上掩码之后的注意力分数", { cols: TOK, cw: 60 })],
+      say: "掩码多头自注意力和编码器里的多头自注意力算法相同，只多一步：算完注意力分数后，把每个 token 后面位置的分数换成 −∞。<bos> 这一行只留自己，I 这一行留 <bos> 和 I，love 这一行三个都留。",
+      code: "mask = torch.triu(torch.ones(3, 3), diagonal=1).bool()   # 对角线以上为 True\nscores = scores.masked_fill(mask, float(\"-inf\"))" },
+    { on: ["in", "mattn"], hot: ["mattn"], grids: [o(M1.weights, "注意力权重（第 1 个头）", { cols: TOK, cw: 60, heat: true, hiRow: 2 }), { op: "↓", opText: "× V，两个头拼起来，× W_O" }, o(D.M, "掩码多头自注意力的输出")],
+      say: "softmax 把 −∞ 变成权重 0，所以每个 token 只从自己和前面的 token 取信息。love 这一行的权重是 " + M1.weights[2].map(fmt).join("、") + "。训练时 4 个位置一起算，这个掩码保证每个位置看不到自己要预测的答案。",
+      code: "weights = torch.softmax(scores, dim=-1)   # e^(−∞) = 0\nm = concat([weights @ V, head2]) @ W_O   # [3, 4]" },
+    { on: ["in", "mattn", "an1"], hot: ["an1"], res: 1, grids: [o(D.Y, "Y"), { op: "+" }, o(D.M, "掩码多头自注意力的输出"), { op: "↓", opText: "相加，再做层归一化" }, o(D.D1, "第一个 Add & Norm 之后")],
+      say: "第一个 Add & Norm 把 Y 加到掩码多头自注意力的输出上，再对每一行做层归一化，做法和编码器里的 Add & Norm 相同。",
+      code: "x = layer_norm(y + m)   # [3, 4]" },
+    { on: ["in", "mattn", "an1", "cattn", "enc"], hot: ["cattn", "enc"], res: 1, grids: [{ M: D.Enc, title: "编码器输出（算 K、V）", rows: SRC }, { op: "↓", opText: "Q 来自上一步，K、V 来自编码器输出" }, o(C1.weights, "交叉注意力权重（第 1 个头）", { cols: SRC, cw: 60, heat: true, hiRow: 2 }), { op: "↓", opText: "× V，两个头拼起来，× W_O" }, o(D.C, "多头交叉注意力的输出")],
+      say: "多头交叉注意力的 Q 来自上一步的结果，K 和 V 来自编码器输出，所以注意力权重的每一行是一个译文 token，每一列是一个原文 token。love 这一行的权重是 " + C1.weights[2].map(fmt).join("、") + "：love 的新向量按这个比例从我、爱、猫的 V 里取信息。",
+      code: "c = cross_attn(q=x, k=enc_out, v=enc_out)   # [3, 4]\n# 论文把它叫 encoder-decoder attention" },
+    { on: ["in", "mattn", "an1", "cattn", "an2", "enc"], hot: ["an2"], res: 2, grids: [o(D.D1, "交叉注意力的输入"), { op: "+" }, o(D.C, "多头交叉注意力的输出"), { op: "↓", opText: "相加，再做层归一化" }, o(D.D2, "第二个 Add & Norm 之后")],
+      say: "第二个 Add & Norm 把多头交叉注意力的输入加到它的输出上，再做层归一化。",
+      code: "x = layer_norm(x + c)   # [3, 4]" },
+    { on: ["in", "mattn", "an1", "cattn", "an2", "ffn", "an3", "enc"], hot: ["ffn", "an3"], res: 3, grids: [o(D.Gh, "前馈网络中间：ReLU 之后", { cw: 52, zero: true }), { op: "↓", opText: "× W2 + b2，加回前馈网络的输入，再做层归一化" }, o(D.D3, "解码器层的输出", { hiRow: 2 })],
+      say: "前馈网络和编码器里的一样，每一行单独加工：4 个数变 8 个数，ReLU 把负数换成 0，再变回 4 个数。第三个 Add & Norm 之后得到解码器层的输出。论文的解码器有 6 层，例子只有 1 层。",
+      code: "x = layer_norm(x + ffn(x))   # [3, 4]" },
+    { on: ["in", "mattn", "an1", "cattn", "an2", "ffn", "an3", "lin", "enc"], hot: ["lin"], res: 3, grids: [o(D.D3, "解码器层的输出", { hiRow: 2 })], bars: true, barsY: 150,
+      say: "Linear 只用最后一行，也就是 love 那一行：它和词表里 6 个 token 的那一行权重各做一次点积，得到 6 个分数；softmax 把分数变成概率。cats 的概率是 " + fmt(D.probs[2][4]) + "，最大。例子里 cats 那一行权重是照着 love 这一行的方向取的，真实模型靠训练做到这一点。",
+      code: "logits = x[-1] @ embed.weight.T   # 和 Embedding 共用一张表，[6]\nprobs = torch.softmax(logits, dim=-1)" },
+    { on: ["in", "mattn", "an1", "cattn", "an2", "ffn", "an3", "lin", "out", "enc"], hot: ["out"], res: 3, grids: [o(D.D3, "解码器层的输出", { hiRow: 2 })], bars: true, barsY: 150,
+      say: "解码器选概率最大的 cats 作为下一个 token。cats 接到输入后面，下一轮的输入是 <bos> I love cats。",
+      code: "next_token = vocab[probs.argmax()]   # \"cats\"\ndec_in.append(next_token)" }
+  ];
+
+  var NOTES = {
+    in: { title: "输入 Y", rows: [
+      ["是什么", "解码器输入 <bos> I love 经过 Embedding × √d_model 加位置编码得到的 3 行向量。"],
+      ["形状", "例子 [3, 4]；论文 [已写出的 token 个数 + 1, 512]。"] ] },
+    mattn: { title: "掩码多头自注意力", rows: [
+      ["是什么", "多头自注意力，Q、K、V 都来自 Y；算完注意力分数后，每个 token 后面位置的分数换成 −∞。"],
+      ["为什么要掩码", "训练时整句译文一次放进来，掩码保证每个位置只能看到自己和前面的 token，看不到它要预测的答案。生成时后面本来就没有 token，掩码让训练和生成看到的东西一样。"],
+      ["输入、输出", "输入 Y [3, 4]，输出 [3, 4]。"] ] },
+    an1: { title: "Add & Norm（第一个）", rows: [["是什么", "残差连接加层归一化：Y 加上掩码多头自注意力的输出，再把每一行调成平均数 0、标准差 1。"]] },
+    cattn: { title: "多头交叉注意力", rows: [
+      ["是什么", "Q 来自解码器这边上一步的结果，K、V 来自编码器输出。译文的每个 token 按注意力权重从原文 token 的 V 里取信息。"],
+      ["论文里的名字", "encoder-decoder attention。"],
+      ["输入、输出", "Q 的输入 [3, 4]（译文 3 个 token），K、V 的输入 [3, 4]（原文 3 个 token）；注意力权重 [3, 3]；输出 [3, 4]。译文和原文的 token 个数不一样时，注意力权重是 [译文个数, 原文个数]。"],
+      ["没有掩码", "原文整句都已经给出，每个译文 token 可以看全部原文 token。"] ] },
+    an2: { title: "Add & Norm（第二个）", rows: [["是什么", "多头交叉注意力的输入加到它的输出上，再做层归一化。"]] },
+    ffn: { title: "前馈网络", rows: [["是什么", "和编码器层里的前馈网络结构相同（权重不同）：每一行单独做 4 → 8 → 4 两次线性变换，中间用 ReLU。"]] },
+    an3: { title: "Add & Norm（第三个）", rows: [["是什么", "前馈网络的输入加到它的输出上，再做层归一化。结果是解码器层的输出，送进下一个解码器层；最后一个解码器层的输出送进 Linear。"]] },
+    lin: { title: "Linear + Softmax", rows: [
+      ["是什么", "Linear 拿一行 d_model 个数和词表里每个 token 的那一行权重做点积，得到每个 token 一个分数；Softmax 把分数变成概率。"],
+      ["例子的词表", "6 个 token：<bos>、<eos>、I、love、cats、dogs。论文的词表约 37000 个 token。"],
+      ["权重", "论文里 Linear 和 Embedding 共用同一张表。例子里 cats 那一行权重是照着 love 这一行的方向取的，用来演示；真实模型靠训练得到。"] ] },
+    out: { title: "下一个 token", rows: [["是什么", "概率最大的 token：cats。它接到解码器输入后面，第 4 轮输入 <bos> I love cats，写出 <eos> 后停止。"]] },
+    enc: { title: "编码器输出", rows: [
+      ["是什么", "“编码器一层”那一页最后算出的 3 行向量，一行对应一个原文 token：我、爱、猫。"],
+      ["谁读它", "每个解码器层的多头交叉注意力都用它算 K 和 V。每一轮都读同一份。"] ] }
+  };
+
+  makeView({ P: "d-", key: "decoder", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hot", "这一步讲到的子层"], ["hi", "跟着看的“love”那一行"], ["heat", "注意力权重：越深越大"], ["masked", "被掩码挡住的位置"], ["info", "点框看说明"]] });
+})();
+
+/* ===== 第 5 页：从编码器 + 解码器模型一步步推出单纯解码器模型 ===== */
+(function () {
+  var G = D2;
+  var SRC = ["我", "爱", "猫"], TGT = ["<bos>", "I", "love"], ROW = SRC.concat(TGT);
+  var EX = 20, EW = 170, DX = 210, DW = 280, CX = DX + DW / 2;
+  var Y = { inp: 40, frame: 114, msa: 138, ca: 204, ffn: 270, lin: 350, out: 416 };
+  var TX = 575, CW = 48;
+  var OK = "✓";
+
+  /* 谁能从谁那里取信息：✓ 能取，null 被掩码挡住 */
+  function lower(n, offset) {
+    var M = [];
+    for (var i = 0; i < n; i++) { var r = []; for (var j = 0; j < n + (offset || 0); j++) r.push(j <= i + (offset || 0) ? OK : null); M.push(r); }
+    return M;
+  }
+  var T_TGT = lower(3);                                   // 译文看译文：下三角
+  var T_CROSS = [[OK, OK, OK], [OK, OK, OK], [OK, OK, OK]]; // 译文看原文：全部能取
+  var T_ROW3 = lower(3, 3);                               // 6 个 token 里译文的 3 行
+  var T_ALL = lower(6);                                   // 6 × 6
+  var T_ENC = [[OK, OK, OK], [OK, OK, OK], [OK, OK, OK]];   // 编码器：原文看原文，不加掩码
+  var W_ALL = G.weights.map(function (r, i) { return r.map(function (v, j) { return j > i ? null : v; }); });
+
+  function region(A, root, x, y, c0, r0, cols, rows, cls) {
+    A.mk("rect", { "class": "region " + cls, x: x + c0 * CW - 2, y: y + r0 * 28 - 2, width: cols * CW + 4, height: rows * 28 + 4, rx: 4 }, root);
+  }
+  function topLine(g, y) {
+    g.querySelector(".titlecn").setAttribute("y", y + 22);
+    g.querySelector(".info circle").setAttribute("cy", y + 18);
+    g.querySelector(".info text").setAttribute("y", y + 22);
+  }
+  function chips(A, g, x, y, list, kinds) { list.forEach(function (t, i) { x += A.chip(g, x, y, t, kinds[i]) + 2; }); }
+
+  function draw(A, root, s) {
+    var st = s.stage;
+    var noEnc = st >= 6, noCa = st >= 5, joined = st >= 4;
+    var on = ["d_in", "d_msa", "d_ca", "d_ffn", "d_lin", "d_out", "e_src", "e_enc", "e_out"];
+    var S = { on: on, hot: s.hot };
+
+    // 编码器这一列
+    var g = A.box(root, S, "e_src", EX, Y.inp, EW, 64, "原文", "", { cn: true, ghost: noEnc });
+    topLine(g, Y.inp);
+    if (!joined) chips(A, g, EX + 12, Y.inp + 31, SRC, ["found", "found", "found"]);
+    else A.mk("text", { "class": "sub", x: EX + 14, y: Y.inp + 48 }, g, "接到译文前面了");
+    A.box(root, S, "e_enc", EX, Y.msa, EW, 50, "编码器 × 6", noEnc ? "删掉" : "不加掩码", { cn: true, proc: !noEnc, ghost: noEnc });
+    A.box(root, S, "e_out", EX, Y.ca, EW, 50, "编码器输出", noEnc ? "删掉" : "原文 3 行", { cn: true, ghost: noEnc });
+    if (!joined) A.arrow(root, "M" + (EX + EW / 2) + " " + (Y.inp + 66) + " V" + (Y.msa - 4));
+    if (!noEnc) A.arrow(root, "M" + (EX + EW / 2) + " " + (Y.msa + 52) + " V" + (Y.ca - 4));
+    if (!noCa) A.arrow(root, "M" + (EX + EW + 2) + " " + (Y.ca + 25) + " H" + (DX - 4), "warm");
+
+    // 解码器这一列
+    g = A.box(root, S, "d_in", DX, Y.inp, DW, 64, joined ? "解码器的输入：原文 + 译文" : "解码器的输入：译文", "", { cn: true });
+    topLine(g, Y.inp);
+    if (joined) chips(A, g, DX + 10, Y.inp + 31, ROW, st === 4 ? ["new", "new", "new", "found", "found", "found"] : ["found", "found", "found", "found", "found", "found"]);
+    else chips(A, g, DX + 12, Y.inp + 31, TGT, ["found", "found", "found"]);
+    if (st === 4) { A.arrow(root, "M" + (EX + EW + 2) + " " + (Y.inp + 44) + " H" + (DX - 4), "warm"); }
+
+    A.mk("rect", { "class": "frame", x: DX - 8, y: Y.frame, width: DW + 16, height: 216, rx: 12 }, root);
+    A.mk("text", { "class": "sub", x: DX, y: Y.frame + 17 }, root, "解码器 × 6");
+    A.box(root, S, "d_msa", DX, Y.msa, DW, 50, "掩码多头自注意力", joined ? "6 个 token 一起算" : "译文看译文", { cn: true, proc: true });
+    A.box(root, S, "d_ca", DX, Y.ca, DW, 50, "多头交叉注意力", noCa ? "删掉" : "译文看原文，K、V 来自编码器输出", { cn: true, proc: !noCa, ghost: noCa });
+    A.box(root, S, "d_ffn", DX, Y.ffn, DW, 50, "前馈网络", "", { cn: true, proc: true });
+    A.box(root, S, "d_lin", DX, Y.lin, DW, 48, "Linear + Softmax", st === 8 ? "每一行都用" : "只用最后一行（love）", { cn: true });
+    g = A.box(root, S, "d_out", DX, Y.out, DW, 64, st === 8 ? "每个位置的答案" : "下一个 token", "", { cn: true });
+    topLine(g, Y.out);
+    if (st === 8) chips(A, g, DX + 6, Y.out + 31, ["爱", "猫", "<bos>", "I", "love", "cats"], ["new", "new", "new", "new", "new", "new"]);
+    else chips(A, g, DX + 12, Y.out + 31, ["cats"], ["new"]);
+    A.arrow(root, "M" + CX + " " + (Y.inp + 66) + " V" + (Y.msa - 4));
+    if (noCa) A.arrow(root, "M" + CX + " " + (Y.msa + 52) + " V" + (Y.ffn - 4));
+    else { A.arrow(root, "M" + CX + " " + (Y.msa + 52) + " V" + (Y.ca - 4)); A.arrow(root, "M" + CX + " " + (Y.ca + 52) + " V" + (Y.ffn - 4)); }
+    A.arrow(root, "M" + CX + " " + (Y.ffn + 52) + " V" + (Y.lin - 4));
+    A.arrow(root, "M" + CX + " " + (Y.lin + 50) + " V" + (Y.out - 4));
+    A.mk("text", { "class": "sub", x: DX, y: Y.out + 84 }, root, "每个子层后面都有 Add & Norm，图里省略");
+
+    // 右边：表
+    var y0 = 20, top;
+    if (st === 1) {
+      A.mk("text", { "class": "gtitle", x: TX - 50, y: y0 + 13 }, root, "love 这一行写 cats 要用到的两类信息");
+      A.mk("text", { "class": "glabel", x: TX - 8, y: y0 + 58, "text-anchor": "end" }, root, "原文");
+      chips(A, root, TX, y0 + 40, SRC, ["found", "found", "found"]);
+      A.mk("text", { "class": "glabel", x: TX - 8, y: y0 + 98, "text-anchor": "end" }, root, "译文");
+      chips(A, root, TX, y0 + 80, TGT, ["found", "found", "found"]);
+    }
+    if (st === 2 || st === 3) {
+      A.grid(root, TX, y0, T_TGT, { id: "t_tgt", title: "掩码多头自注意力：译文看译文", rows: TGT, cols: TGT, cw: CW, hiRow: 2 });
+      region(A, root, TX, y0 + 40, 0, 0, 3, 3, "tgt");
+    }
+    if (st === 3) {
+      A.grid(root, TX, 180, T_CROSS, { id: "t_cross", title: "多头交叉注意力：译文看原文", rows: TGT, cols: SRC, cw: CW, hiRow: 2 });
+      region(A, root, TX, 220, 0, 0, 3, 3, "cross");
+    }
+    if (st === 4 || st === 5) {
+      A.grid(root, TX, y0, T_ROW3, { id: "t_row3", title: st === 4 ? "两张表左右拼起来：译文 3 行 × 6 列" : "6 个 token 的掩码多头自注意力：译文的 3 行", rows: TGT, cols: ROW, cw: CW, hiRow: 2 });
+      region(A, root, TX, y0 + 40, 0, 0, 3, 3, "cross");
+      region(A, root, TX, y0 + 40, 3, 0, 3, 3, "tgt");
+      A.mk("text", { "class": "sub", x: TX, y: y0 + 150 }, root, "黄框来自多头交叉注意力那张表，紫框来自掩码多头自注意力那张表");
+    }
+    if (st === 6) {
+      A.grid(root, TX, y0, T_ALL, { id: "t_all", title: "6 个 token 的掩码多头自注意力：6 行 × 6 列", rows: ROW, cols: ROW, cw: CW, hiRows: [0, 1, 2] });
+      top = y0 + 40;
+      region(A, root, TX, top, 0, 0, 3, 3, "src"); region(A, root, TX, top, 0, 3, 3, 3, "cross"); region(A, root, TX, top, 3, 3, 3, 3, "tgt");
+      A.grid(root, TX, 270, T_ENC, { id: "t_enc", title: "删掉的编码器：原文看原文，不加掩码", rows: SRC, cols: SRC, cw: CW, hiRow: 0 });
+      region(A, root, TX, 310, 0, 0, 3, 3, "src");
+    }
+    if (st === 7) {
+      A.grid(root, TX, y0, W_ALL, { id: "t_w", title: "例子算出的注意力权重（第 1 个头）", rows: ROW, cols: ROW, cw: CW, heat: true, hiRow: 5 });
+      top = y0 + 40;
+      region(A, root, TX, top, 0, 0, 3, 3, "src"); region(A, root, TX, top, 0, 3, 3, 3, "cross"); region(A, root, TX, top, 3, 3, 3, 3, "tgt");
+      A.mk("text", { "class": "gtitle", x: TX - 50, y: 280 }, root, "Linear + Softmax：love 这一行 → 概率");
+      ["我", "爱", "猫", "<bos>", "I", "love", "cats", "<eos>"].forEach(function (t, i) {
+        var by = 292 + i * 24;
+        A.mk("text", { "class": "glabel", x: TX - 8, y: by + 14, "text-anchor": "end" }, root, t);
+        A.mk("rect", { "class": "bar" + (i === 6 ? " win" : ""), x: TX, y: by + 3, width: Math.max(2, G.probs[i] * 260), height: 15, rx: 3 }, root);
+        A.mk("text", { "class": "glabel", x: TX + 6 + Math.max(2, G.probs[i] * 260), y: by + 14 }, root, fmt(G.probs[i]));
+      });
+    }
+    if (st === 8) {
+      A.mk("text", { "class": "gtitle", x: TX - 50, y: y0 + 13 }, root, "训练时每个位置的输入和答案");
+      A.mk("text", { "class": "glabel", x: TX - 28, y: y0 + 58, "text-anchor": "end" }, root, "输入");
+      ROW.forEach(function (t, i) { A.chip(root, TX - 20 + i * 70, y0 + 40, t, "found"); });
+      A.mk("text", { "class": "glabel", x: TX - 28, y: y0 + 98, "text-anchor": "end" }, root, "答案");
+      ["爱", "猫", "<bos>", "I", "love", "cats"].forEach(function (t, i) { A.chip(root, TX - 20 + i * 70, y0 + 80, t, "new"); });
+      ROW.forEach(function (t, i) { A.mk("text", { "class": "op", x: TX - 20 + i * 70 + 12, y: y0 + 76 }, root, "↓"); });
+    }
+  }
+
+  var wl = G.weights[5];
+  var STEPS = [
+    { stage: 1, hot: ["d_in", "d_out"],
+      say: "图里是前 4 页的编码器 + 解码器模型，停在“解码器一层”那一页的第 3 轮：解码器的输入是 <bos> I love，love 这一行要写出下一个 token cats。love 这一行要写对 cats，需要两类信息：原文“我 爱 猫”说了什么，以及译文已经写到了哪里（<bos> I love）。这个模型用两个不同的子层分别取这两类信息，下面两步一类一类看。",
+      code: "dec_in = [\"<bos>\", \"I\", \"love\"]   # 第 3 轮，要写出 \"cats\"" },
+    { stage: 2, hot: ["d_msa"],
+      say: "第一类是译文的信息，由掩码多头自注意力来取。右边的表说明谁能从谁那里取信息：行是取信息的 token，列是被取信息的 token，✓ 表示能取，−∞ 表示被掩码挡住。love 这一行三格都是 ✓，所以 love 从 <bos>、I、love 取信息。这张表只有译文的 3 列，没有原文的列，所以掩码多头自注意力取不到原文的信息。",
+      code: "m = masked_self_attn(q=译文, k=译文, v=译文)   # 表：译文 3 行 × 译文 3 列" },
+    { stage: 3, hot: ["e_src", "e_enc", "e_out", "d_ca"],
+      say: "第二类是原文的信息，要走另一条路：编码器先读“我 爱 猫”，算出编码器输出；然后多头交叉注意力用译文算 Q、用编码器输出算 K 和 V，让每个译文 token 从原文取信息。下面这张表的行是译文、列是原文，全部是 ✓，所以 love 从我、爱、猫取信息。到这里，love 的两类信息分在两张表里，由两个子层分两次取到，而且原文那一类还要先经过编码器。",
+      code: "enc_out = encoder([\"我\", \"爱\", \"猫\"])\nc = cross_attn(q=译文, k=enc_out, v=enc_out)   # 表：译文 3 行 × 原文 3 列" },
+    { stage: 4, hot: ["e_src", "d_in"],
+      say: "现在换一种放法：把原文“我 爱 猫”接到译文前面，解码器的输入变成一行 6 个 token：我 爱 猫 <bos> I love。这样上一步的两张表可以左右拼成一张表：左边 3 列是原文，来自多头交叉注意力那张表（黄框）；右边 3 列是译文，来自掩码多头自注意力那张表（紫框）。拼好以后，love 这一行有 6 格，原文和译文的信息都在这一行里。",
+      code: "dec_in = [\"我\", \"爱\", \"猫\"] + [\"<bos>\", \"I\", \"love\"]   # 6 个 token" },
+    { stage: 5, hot: ["d_msa", "d_ca"],
+      say: "拼好的这张表，正好等于一个掩码多头自注意力在这 6 个 token 上算出的表里译文的 3 行。原因是掩码只挡住每个 token 后面的位置：原文排在译文前面，所以原文的 3 列全部是 ✓；译文的 3 列和原来一样，只挡住后面。所以一个掩码多头自注意力就能同时取到原文和译文的信息，多头交叉注意力不再需要，删掉。",
+      code: "m = masked_self_attn(dec_in)   # 6 个 token 一起算，love 这一行能取 6 个 token 的信息\n# 删掉 cross_attn" },
+    { stage: 6, hot: ["e_src", "e_enc", "e_out", "d_msa"],
+      say: "原文的 3 个 token 进了解码器的输入，它们在表里也有自己的 3 行，就是右边上面新加的 3 行（绿框）。掩码同样挡住它们后面的位置：“我”只能从自己取信息，“爱”从我、爱取，“猫”从我、爱、猫取。原文在解码器层里已经被读过，编码器也不再需要，删掉。删掉以后有一点不一样：编码器读原文时不加掩码（下面那张表，“我”能从爱、猫取信息），现在原文的每个 token 只能从自己和前面的 token 取信息。",
+      code: "# 删掉 encoder：原文直接在解码器层里被读\n# 原文的行也加掩码：我那一行只有 1 个 ✓" },
+    { stage: 7, hot: ["d_in", "d_msa", "d_ffn", "d_lin", "d_out"],
+      say: "删完以后剩下的就是单纯解码器模型：只有一个输入，即原文和译文接成的一行；每个解码器层只有掩码多头自注意力和前馈网络两个子层。右边是用一个 1 层、d_model = 4 的小例子算出的注意力权重：love 这一行从我、爱、猫取了 " + wl.slice(0, 3).map(fmt).join("、") + "，从 <bos>、I、love 取了 " + wl.slice(3).map(fmt).join("、") + "。Linear + Softmax 用 love 这一行算出 cats 的概率是 " + fmt(G.probs[6]) + "，模型写出 cats。",
+      code: "x = layer_norm(x + masked_self_attn(x))\nx = layer_norm(x + ffn(x))\nnext_token = vocab[softmax(linear(x[-1])).argmax()]   # \"cats\"" },
+    { stage: 8, hot: ["d_in", "d_lin", "d_out"],
+      say: "训练时，编码器 + 解码器模型只让译文的 3 个位置猜下一个 token：<bos> 猜 I，I 猜 love，love 猜 cats。单纯解码器模型的输入里也有原文，它让整行 6 个位置都猜下一个 token：我猜爱，爱猜猫，猫猜 <bos>，后面 3 个位置和编码器 + 解码器模型相同。掩码让每个位置看不到后面的 token，所以 6 个位置能在一次运行里同时猜。",
+      code: "logits = model(dec_in)   # 6 行，每行是词表里每个 token 的分数\nloss = cross_entropy(logits, [\"爱\", \"猫\", \"<bos>\", \"I\", \"love\", \"cats\"])" }
+  ];
+
+  function n(title, rows) { return { title: title, rows: rows }; }
+  var NOTES = {
+    e_src: n("原文", [
+      ["是什么", "原文的 3 个 token：我 爱 猫。"],
+      ["第 1–3 步", "原文交给编码器。"],
+      ["第 4 步以后", "原文接到译文前面，放进解码器的输入。"] ]),
+    e_enc: n("编码器 × 6", [
+      ["是什么", "6 个编码器层，每层是多头自注意力加前馈网络，读原文时不加掩码。"],
+      ["第 6 步", "原文已经在解码器层里被读过，编码器被删掉。"] ]),
+    e_out: n("编码器输出", [
+      ["是什么", "编码器算出的原文 3 行向量，多头交叉注意力用它算 K 和 V。"],
+      ["第 6 步", "编码器被删掉，编码器输出也就没有了。"] ]),
+    d_in: n("解码器的输入", [
+      ["第 1–3 步", "只有译文：<bos> I love。"],
+      ["第 4 步以后", "原文接到译文前面：我 爱 猫 <bos> I love。<bos> 标出译文从哪里开始。真实模型常在这里放分隔用的 token，或者在前面放一段提示文字，例如“把下面的中文翻译成英文”。"] ]),
+    d_msa: n("掩码多头自注意力", [
+      ["是什么", "每个 token 从自己和前面的 token 取信息，后面的位置被掩码挡住（分数换成 −∞）。"],
+      ["第 1–3 步", "输入只有译文，所以只能取译文的信息。"],
+      ["第 4 步以后", "输入里原文排在译文前面，所以译文的每个 token 也能从原文取信息。"] ]),
+    d_ca: n("多头交叉注意力", [
+      ["是什么", "Q 来自译文，K、V 来自编码器输出，让译文的每个 token 从原文取信息。"],
+      ["第 5 步", "掩码多头自注意力已经能从原文取信息，多头交叉注意力被删掉。"] ]),
+    d_ffn: n("前馈网络", [["是什么", "每一行单独加工：4 → 8 → 4。从头到尾没有变化。"]]),
+    d_lin: n("Linear + Softmax", [
+      ["是什么", "把一行向量变成词表里每个 token 的概率。"],
+      ["生成时", "只用最后一行，也就是 love 那一行。"],
+      ["训练时", "每一行都用，每行猜它后面的那个 token。"] ]),
+    d_out: n("下一个 token", [
+      ["是什么", "概率最大的 token：cats。"],
+      ["第 7 步的数字", "数字来自一个 1 层、d_model = 4 的小例子，权重是随机取的小数；cats 那一行权重是照着 love 这一行的方向取的，真实模型靠训练做到这一点。"] ]),
+    t_tgt: n("译文看译文", [["是什么", "掩码多头自注意力的表。行和列都是译文 token；✓ 能取信息，−∞ 被掩码挡住。"]]),
+    t_cross: n("译文看原文", [["是什么", "多头交叉注意力的表。行是译文 token，列是原文 token，没有掩码，全部是 ✓。"]]),
+    t_row3: n("译文 3 行 × 6 列", [["是什么", "左 3 列来自多头交叉注意力的表，右 3 列来自掩码多头自注意力的表。它和 6 个 token 上的掩码多头自注意力表里译文的 3 行一模一样。"]]),
+    t_all: n("6 行 × 6 列", [
+      ["是什么", "6 个 token 上的掩码多头自注意力表。"],
+      ["三个框", "绿框：原文看原文，原来由编码器做。黄框：译文看原文，原来由多头交叉注意力做。紫框：译文看译文，原来由解码器的掩码多头自注意力做。右上 3 × 3 是原文看译文，全部被挡住。"] ]),
+    t_enc: n("编码器的表", [["是什么", "编码器读原文时不加掩码，原文的每个 token 能从全部原文 token 取信息。删掉编码器以后，这件事变成绿框：只能从自己和前面取。"]]),
+    t_w: n("例子算出的注意力权重", [["是什么", "第 7 步的单纯解码器模型在 6 个 token 上算出的注意力权重（第 1 个头）。每行加起来等于 1，被挡住的位置是 −∞，权重为 0。"]])
+  };
+
+  makeView({ P: "g-", key: "deconly", steps: STEPS, notes: NOTES, draw: draw,
+    legend: [["hot", "这一步讲到的部分"], ["ghost", "虚线框：已删掉"], ["ok", "✓ 能取信息"], ["masked", "−∞ 被掩码挡住"], ["src", "原文看原文"], ["cross", "译文看原文"], ["tgt", "译文看译文"], ["info", "点框或表看说明"]] });
+})();
+
+</script>
+<script>
+(function () {
+  var KEYS = ["overview", "attention", "encoder", "decoder", "deconly"], active = "overview";
+  var TITLE = { overview: "Transformer 整体：编码器和解码器", attention: "Transformer 注意力怎么算", encoder: "Transformer 编码器一层逐步讲解", decoder: "Transformer 解码器一层逐步讲解", deconly: "单纯解码器模型和编码器 + 解码器模型的区别" };
+  window.__setHash = function (key, n) {
+    if (key !== active) return;
+    try { history.replaceState(null, "", "#" + key + "-" + n); } catch (e) {}
+  };
+  function activate(key, step) {
+    active = key;
+    KEYS.forEach(function (k) {
+      document.getElementById({ overview: "o", attention: "a", encoder: "e", decoder: "d", deconly: "g" }[k] + "-view").hidden = (k !== key);
+      document.getElementById("tab-" + k).setAttribute("aria-selected", k === key ? "true" : "false");
+    });
+    document.title = TITLE[key];
+    var v = window.__v[key];
+    v.show(step === undefined ? v.cur() : step - 1);
+  }
+  KEYS.forEach(function (k) {
+    document.getElementById("tab-" + k).addEventListener("click", function () { activate(k); window.scrollTo(0, 0); });
+  });
+  function fromHash() {
+    var m = /^#(overview|attention|encoder|decoder|deconly)(?:-(\d+))?$/.exec(location.hash);
+    if (m) activate(m[1], m[2] ? parseInt(m[2], 10) : undefined);
+    else activate(active);
+  }
+  window.addEventListener("hashchange", fromHash);
+  fromHash();
+})();
+</script>
+</body>
+</html>

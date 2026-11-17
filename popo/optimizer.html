@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>优化器逐步讲解</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #16202b; --muted: #5d6b7a; --line: #c9d1da;
+    --accent: #0b6e8a; --warm: #a8650c; --proc: #e3f1f5; --good: #2f8a4f; --bad: #b42318; --purple: #7b4fb3;
+    --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f151b; --panel: #161e26; --ink: #e6edf3; --muted: #93a1b0; --line: #2c3844;
+      --accent: #4cc0df; --warm: #f0b44c; --proc: #16303a; --good: #62d48a; --bad: #ff7b72; --purple: #b99bf0; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+  .wrap { padding: 24px 16px 40px; }
+  .view { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  .view[hidden] { display: none; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0; text-wrap: balance; }
+  .gist { margin: -6px 0 0; font-size: 16px; line-height: 1.7; max-width: 48em; }
+
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  svg.diagram { display: block; width: 100%; height: auto; font-family: var(--font-body); }
+  .colhead { fill: var(--muted); font-size: 13px; font-weight: 500; }
+
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  .title { fill: var(--ink); font-family: var(--font-code); font-size: 13.5px; font-weight: 600; }
+  .titlecn { fill: var(--ink); font-size: 14px; font-weight: 700; }
+  .sub { fill: var(--muted); font-size: 12.5px; }
+  .node { opacity: 0.25; transition: opacity .45s; }
+  .node.on, .node.sel { opacity: 1; }
+  .node.hot .box { stroke: var(--accent); stroke-width: 3; }
+  .node.sel .box { stroke: var(--ink); stroke-width: 3; stroke-dasharray: 7 4; }
+  .node.proc .box { fill: var(--proc); }
+  .clickable { cursor: pointer; outline: none; }
+  .clickable:hover .box { stroke: var(--ink); }
+  .clickable:focus-visible .box { stroke: var(--ink); stroke-width: 3; }
+
+  .info circle { fill: var(--panel); stroke: var(--muted); stroke-width: 1.5; }
+  .info text { fill: var(--muted); font-family: var(--font-code); font-size: 12px; font-weight: 600; }
+  .clickable:hover .info circle, .sel .info circle { fill: var(--ink); stroke: var(--ink); }
+  .clickable:hover .info text, .sel .info text { fill: var(--panel); }
+
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  .link { fill: none; stroke: var(--accent); stroke-width: 2.2; animation: fadein .45s; }
+  .link.warm { stroke: var(--warm); }
+  .linklabel { fill: var(--accent); font-family: var(--font-code); font-size: 12px; font-weight: 600; animation: fadein .45s; }
+  .linklabel.warm { fill: var(--warm); }
+
+  .gtitle { fill: var(--ink); font-size: 13px; font-weight: 700; }
+  .glabel { fill: var(--muted); font-size: 12.5px; font-family: var(--font-code); }
+  .cell rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+  .cell text { font-family: var(--font-code); font-size: 12px; fill: var(--ink); }
+  .cell.hi rect.bg { fill: color-mix(in srgb, var(--warm) 22%, var(--panel)); stroke: var(--warm); }
+  .cell.blank rect.bg { fill: var(--panel); stroke-dasharray: 3 3; }
+  .formula { fill: var(--muted); font-size: 12.5px; font-family: var(--font-code); }
+  .gridg { animation: fadein .45s; }
+  .gridg.clickable:hover .gframe { stroke: var(--ink); }
+  .gframe { fill: none; stroke: transparent; stroke-width: 2; }
+  .gridg.sel .gframe { stroke: var(--ink); stroke-dasharray: 7 4; }
+  .track { fill: var(--bg); stroke: var(--line); stroke-width: 1; }
+  .fill { fill: var(--accent); animation: fadein .45s; }
+  .fill.warm { fill: var(--warm); }
+  .target { stroke: var(--good); stroke-width: 2.5; }
+  .tlabel { fill: var(--good); font-size: 12.5px; font-weight: 600; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; color: var(--muted); font-size: 13.5px; margin-top: -6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .sw.hot { border: 3px solid var(--accent); background: var(--panel); }
+  .sw.proc { background: var(--proc); border-color: var(--line); }
+  .sw.hi { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); border-color: var(--warm); }
+  .sw.sgd { background: var(--warm); border-color: var(--warm); }
+  .sw.adam { background: var(--accent); border-color: var(--accent); }
+  .legend .icon { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--muted); display: inline-grid; place-items: center; font-family: var(--font-code); font-size: 11px; font-weight: 600; }
+
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--ink); border-radius: 14px; padding: 16px 20px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .note[hidden] { display: none; }
+  .note-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .note-title { margin: 0; font-family: var(--font-code); font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+  .note-close { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .note-close:hover { border-color: var(--ink); }
+  .note dl { margin: 0; display: grid; grid-template-columns: 8.5em 1fr; gap: 10px 16px; }
+  .note dt { color: var(--muted); font-size: 14px; padding-top: 1px; }
+  .note dd { margin: 0; font-size: 15px; line-height: 1.7; min-width: 0; }
+  .note dd p { margin: 0; }
+  .sample { margin: 0; font-family: var(--font-code); font-size: 12.5px; line-height: 1.55; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  .caption { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-height: 140px; display: flex; flex-direction: column; gap: 12px; }
+  .caption .say { margin: 0; font-size: 19px; line-height: 1.65; font-weight: 500; max-width: 42em; text-wrap: pretty; }
+  .caption .code { margin: 0; font-family: var(--font-code); font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+
+  .nav { display: flex; align-items: center; gap: 14px; }
+  .nav button.arrow-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .nav button.arrow-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .nav button.arrow-btn:disabled { opacity: .35; cursor: default; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .dots { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; justify-content: center; }
+  .dots button { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); background: var(--panel); cursor: pointer; }
+  .dots button.done { background: var(--line); }
+  .dots button.now { background: var(--accent); border-color: var(--accent); transform: scale(1.25); }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; min-width: 3.5em; text-align: right; flex: none; }
+
+  @media (min-width: 700px) {
+    .nav button.arrow-btn { position: fixed; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+    .nav .prev { left: 8px; }
+    .nav .next { right: 8px; }
+    .view { padding-inline: 64px; }
+  }
+  @media (min-width: 1200px) {
+    .view { padding-inline: 0; }
+    .nav .prev { left: calc(50% - 592px); }
+    .nav .next { right: calc(50% - 592px); }
+  }
+  @media (max-width: 640px) { .note dl { grid-template-columns: 1fr; gap: 2px 0; } .note dd { margin-bottom: 8px; } }
+  @media (prefers-reduced-motion: reduce) { .node, .link, .linklabel, .gridg, .fill { transition: none; animation: none; } }
+
+  .tabs { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 14px 16px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .tab { font-family: var(--font-body); font-size: 14px; padding: 7px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .tab:hover { border-color: var(--accent); }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0f151b; } }
+</style>
+</head>
+<body>
+<nav class="tabs" role="tablist" aria-label="切换页面">
+  <button class="tab" role="tab" id="tab-overview" aria-selected="true">整体：一步训练里的优化器</button>
+  <button class="tab" role="tab" id="tab-sgd" aria-selected="false">SGD：最简单的优化器</button>
+  <button class="tab" role="tab" id="tab-adamw" aria-selected="false">AdamW 怎么算</button>
+  <button class="tab" role="tab" id="tab-batch" aria-selected="false">本项目：32 个回答、16 次累积、学习率</button>
+</nav>
+<div class="wrap" id="wrap"></div>
+
+<template id="view-tpl">
+<div class="view">
+  <h1 data-r="h1"></h1>
+  <p class="gist" data-r="gist"></p>
+  <div class="legend" data-r="legend" aria-label="图例"></div>
+  <div class="stage">
+    <svg class="diagram" data-r="diagram" role="group">
+      <defs>
+        <marker data-r="head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker>
+        <marker data-r="headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker>
+      </defs>
+      <g data-r="draw"></g>
+    </svg>
+  </div>
+  <section class="note" data-r="note" hidden aria-live="polite">
+    <div class="note-head">
+      <h2 class="note-title" data-r="noteTitle"></h2>
+      <button class="note-close" data-r="noteClose" aria-label="隐藏说明"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 2l10 10M12 2 2 12"></path></svg></button>
+    </div>
+    <dl data-r="noteRows"></dl>
+  </section>
+  <div class="caption" aria-live="polite">
+    <p class="say" data-r="say"></p>
+    <p class="code" data-r="code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" data-r="prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" data-r="dots"></div>
+    <span class="count" data-r="count"></span>
+    <button class="arrow-btn next" data-r="next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</template>
+
+<script>
+var SVGNS = "http://www.w3.org/2000/svg";
+function fmt(v) { return typeof v === "string" ? v : String(v); }
+
+/* 一个页面：顶部 h1 和一句话，中间 SVG，点框看说明，下面是这一步的说明和代码，最下面翻页 */
+function makeView(cfg) {
+  var view = document.getElementById("view-tpl").content.firstElementChild.cloneNode(true);
+  view.id = cfg.key + "-view";
+  document.getElementById("wrap").appendChild(view);
+  var $ = function (r) { return view.querySelector('[data-r="' + r + '"]'); };
+  $("h1").textContent = cfg.h1;
+  $("gist").textContent = cfg.gist;
+  $("diagram").setAttribute("viewBox", cfg.viewBox);
+  $("diagram").setAttribute("aria-label", cfg.h1);
+  $("head").id = cfg.key + "-head";
+  $("headw").id = cfg.key + "-headw";
+  var selected = null, cur = 0;
+
+  function mk(tag, attrs, parent, text) {
+    var el = document.createElementNS(SVGNS, tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    if (text !== undefined) el.textContent = text;
+    if (parent) parent.appendChild(el);
+    return el;
+  }
+  function clickable(g, id) {
+    g.classList.add("clickable");
+    g.setAttribute("tabindex", "0"); g.setAttribute("role", "button");
+    g.setAttribute("aria-label", cfg.notes[id].title + "，点击查看说明");
+    g.setAttribute("data-id", id);
+    if (id === selected) g.classList.add("sel");
+    g.addEventListener("click", function () { choose(id); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(id); } });
+  }
+  function info(g, cx, cy) {
+    var ic = mk("g", { "class": "info" }, g);
+    mk("circle", { cx: cx, cy: cy, r: 9 }, ic);
+    mk("text", { x: cx, y: cy + 4, "text-anchor": "middle" }, ic, "i");
+  }
+  /* 框：s.on 里有它就亮，s.hot 里有它就描蓝边 */
+  function box(root, s, id, x, y, w, h, title, sub, opt) {
+    opt = opt || {};
+    var g = mk("g", { "class": "node" + (s.on.indexOf(id) >= 0 ? " on" : "") + (s.hot.indexOf(id) >= 0 ? " hot" : "") + (opt.proc ? " proc" : "") }, root);
+    mk("rect", { "class": "box", x: x, y: y, width: w, height: h, rx: 10 }, g);
+    mk("text", { "class": "titlecn", x: x + 14, y: sub ? y + 24 : y + h / 2 + 5 }, g, title);
+    if (sub) mk("text", { "class": "sub", x: x + 14, y: y + 44 }, g, sub);
+    info(g, x + w - 18, sub ? y + 20 : y + h / 2);
+    clickable(g, id);
+    return g;
+  }
+  /* 一行格子：label 是行名，vals 里 "" 是空格子；o.hi 整行标黄；o.id 点开的说明 */
+  function row(root, x, y, cw, label, vals, o) {
+    o = o || {};
+    var g = mk("g", { "class": "gridg" }, root);
+    if (label) mk("text", { "class": "glabel", x: x - 8, y: y + 19, "text-anchor": "end" }, g, label);
+    vals.forEach(function (v, j) {
+      var hi = o.hi || (o.hiCols && o.hiCols.indexOf(j) >= 0);
+      var cg = mk("g", { "class": "cell" + (hi && v !== "" ? " hi" : "") + (v === "" ? " blank" : "") }, g);
+      mk("rect", { "class": "bg", x: x + j * cw, y: y, width: cw, height: 28 }, cg);
+      mk("text", { x: x + j * cw + cw / 2, y: y + 18.5, "text-anchor": "middle" }, cg, fmt(v));
+    });
+    if (o.id) {
+      var lw = label ? label.replace(/[^\x00-\xff]/g, "xx").length * 7 + 14 : 6;
+      var fr = mk("rect", { "class": "gframe", x: x - lw, y: y - 4, width: vals.length * cw + lw + 26, height: 36, rx: 8 }, g);
+      g.insertBefore(fr, g.firstChild);
+      info(g, x + vals.length * cw + 12, y + 14);
+      clickable(g, o.id);
+    }
+    return g;
+  }
+  function arrow(root, d, warm) { return mk("path", { "class": "link" + (warm ? " warm" : ""), d: d, "marker-end": "url(#" + cfg.key + (warm ? "-headw" : "-head") + ")" }, root); }
+  function label(root, x, y, text, warm, anchor) { return mk("text", { "class": "linklabel" + (warm ? " warm" : ""), x: x, y: y, "text-anchor": anchor || "start" }, root, text); }
+  /* 一条进度条：参数从 1 走向 3，fill 画到当前值 */
+  function bar(root, x, y, w, name, val, warm) {
+    var X = function (v) { return x + (v - 1) / 2 * w; };
+    mk("text", { "class": "glabel", x: x - 8, y: y + 14, "text-anchor": "end" }, root, name);
+    mk("rect", { "class": "track", x: x, y: y, width: w, height: 20, rx: 4 }, root);
+    mk("rect", { "class": "fill" + (warm ? " warm" : ""), x: x, y: y, width: Math.max(2, X(val) - x), height: 20, rx: 4 }, root);
+    mk("text", { "class": "glabel", x: Math.max(X(val), x + 2) + 8, y: y + 14 }, root, val.toFixed(4));
+    mk("line", { "class": "target", x1: X(3), y1: y - 4, x2: X(3), y2: y + 24 }, root);
+  }
+  var api = { mk: mk, box: box, row: row, arrow: arrow, label: label, bar: bar };
+
+  function renderNote(id) {
+    var n = cfg.notes[id];
+    $("noteTitle").textContent = n.title;
+    var dl = $("noteRows"); dl.textContent = "";
+    n.rows.forEach(function (r) {
+      var dt = document.createElement("dt"); dt.textContent = r[0];
+      var dd = document.createElement("dd"); var v = r[1];
+      if (typeof v === "string") { var p = document.createElement("p"); p.textContent = v; dd.appendChild(p); }
+      else { var pre = document.createElement("pre"); pre.className = "sample"; pre.textContent = v.pre; dd.appendChild(pre); }
+      dl.appendChild(dt); dl.appendChild(dd);
+    });
+  }
+  function choose(id) {
+    selected = (selected === id) ? null : id;
+    view.querySelectorAll("[data-id]").forEach(function (g) { g.classList.toggle("sel", g.getAttribute("data-id") === selected); });
+    if (selected) { renderNote(selected); $("note").hidden = false; } else { $("note").hidden = true; }
+  }
+  $("noteClose").addEventListener("click", function () { if (selected) choose(selected); });
+
+  function show(i) {
+    cur = Math.max(0, Math.min(cfg.steps.length - 1, i));
+    var s = cfg.steps[cur];
+    s.on = s.on || []; s.hot = s.hot || [];
+    var root = $("draw"); root.textContent = "";
+    cfg.draw(api, root, s);
+    if (selected && !view.querySelector('[data-id="' + selected + '"]')) choose(selected);
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + cfg.steps.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === cfg.steps.length - 1;
+    var dots = $("dots").children;
+    for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash(cfg.key, cur + 1);
+  }
+  cfg.steps.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 步");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if (view.hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+    if (e.key === "Escape" && selected) choose(selected);
+  });
+  cfg.legend.forEach(function (it) {
+    var sp = document.createElement("span");
+    var sw = document.createElement("i");
+    if (it[0] === "info") { sw.className = "icon"; sw.textContent = "i"; } else sw.className = "sw " + it[0];
+    sp.appendChild(sw); sp.appendChild(document.createTextNode(it[1])); $("legend").appendChild(sp);
+  });
+  view.hidden = true;
+  show(0);
+  window.__v = window.__v || {};
+  window.__v[cfg.key] = { show: show, cur: function () { return cur; } };
+}
+function n(title, rows) { return { title: title, rows: rows }; }
+</script>
+
+<script>
+/* ===== 第 1 页：一步训练里优化器做什么 ===== */
+(function () {
+  var BX = 60, BW = 330, VX = 500, CW = 120, NX = 778;
+  var Y = { loss: 20, par: 110, grad: 190, opt: 270, state: 350, sch: 490 };
+
+  function draw(A, root, s) {
+    var st = s.stage;
+    var S = { on: ["loss", "par", "grad", "opt", "state", "sch"], hot: s.hot || [] };
+    A.box(root, S, "loss", BX, Y.loss, BW, 60, "损失 loss", "0.2 × (w1 − 3)² + 0.002 × (w2 − 3)²");
+    A.box(root, S, "par", BX, Y.par, BW, 60, "参数 w1、w2", "模型里要训练的数");
+    A.box(root, S, "grad", BX, Y.grad, BW, 60, "梯度 p.grad", "挂在每个参数上；每步写入、每步清空");
+    A.box(root, S, "opt", BX, Y.opt, BW, 60, "优化器 AdamW", "optimizer.step() 读梯度，改参数", { proc: true });
+    A.box(root, S, "state", BX, Y.state, BW, 120, "优化器状态 state", "每个参数一份；留到下一步", {});
+    A.box(root, S, "sch", BX, Y.sch, BW, 60, "学习率调度器 lr_scheduler", "每步改一次学习率 lr");
+
+    var h = s.hi || [];
+    A.mk("text", { "class": "colhead", x: VX + CW / 2, y: Y.par - 8, "text-anchor": "middle" }, root, "w1");
+    A.mk("text", { "class": "colhead", x: VX + CW * 1.5, y: Y.par - 8, "text-anchor": "middle" }, root, "w2");
+    A.row(root, VX, Y.loss + 16, CW * 2, "", [st >= 7 ? "0.730" : "0.808"], { hi: h.indexOf("loss") >= 0, id: "v_loss" });
+    var par = st < 4 ? ["1", "1"] : st < 8 ? ["1.099", "1.099"] : ["1.1977", "1.1977"];
+    A.row(root, VX, Y.par + 16, CW, "", par, { hi: h.indexOf("par") >= 0, id: "v_par" });
+    var grad = (st < 2 || st === 6) ? ["", ""] : st < 7 ? ["−0.8", "−0.008"] : ["−0.7604", "−0.007604"];
+    A.row(root, VX, Y.grad + 16, CW, "", grad, { hi: h.indexOf("grad") >= 0, id: "v_grad" });
+    var stp = st < 4 ? [""] : st < 8 ? ["1"] : ["2"];
+    var ea = st < 4 ? ["", ""] : st < 8 ? ["−0.08", "−0.0008"] : ["−0.1480", "−0.00148"];
+    var eq = st < 4 ? ["", ""] : st < 8 ? ["6.4e-4", "6.4e-8"] : ["1.218e-3", "1.218e-7"];
+    var hs = h.indexOf("state") >= 0;
+    A.row(root, VX, Y.state + 10, CW * 2, "step", stp, { hi: hs, id: "v_step" });
+    A.row(root, VX, Y.state + 46, CW, "exp_avg", ea, { hi: hs, id: "v_ea" });
+    A.row(root, VX, Y.state + 82, CW, "exp_avg_sq", eq, { hi: hs, id: "v_eq" });
+    A.row(root, VX, Y.sch + 16, CW * 2, "lr", ["0.1"], { hi: h.indexOf("lr") >= 0, id: "v_lr" });
+
+    var a = s.arrows || [];
+    if (a.indexOf("back") >= 0) { A.arrow(root, "M" + (BX - 2) + " " + (Y.loss + 30) + " H40 V" + (Y.grad + 30) + " H" + (BX - 4)); }
+    if (a.indexOf("step") >= 0) {
+      A.arrow(root, "M200 " + (Y.grad + 62) + " V" + (Y.opt - 4));
+      A.arrow(root, "M170 " + (Y.state - 2) + " V" + (Y.opt + 64), true);
+      A.arrow(root, "M250 " + (Y.opt + 62) + " V" + (Y.state - 4), true);
+      A.arrow(root, "M" + (BX - 2) + " " + (Y.opt + 30) + " H22 V" + (Y.par + 30) + " H" + (BX - 4), true);
+    }
+    var t = s.tag;
+    if (t) A.label(root, NX, t[1], t[0], t[2]);
+  }
+
+  var STEPS = [
+    { stage: 1, hot: ["loss", "par"],
+      say: "例子只有 2 个参数：w1 = 1，w2 = 1。损失 = 0.2 × (w1 − 3)² + 0.002 × (w2 − 3)²，两个参数都等于 3 时损失最小（等于 0）。现在损失是 0.2 × 4 + 0.002 × 4 = 0.808。GRPO 里的参数是策略模型的全部权重，损失是 GRPO 的损失，过程一样。",
+      code: "w = torch.tensor([1.0, 1.0], requires_grad=True)\nloss = 0.2 * (w[0] - 3) ** 2 + 0.002 * (w[1] - 3) ** 2   # 0.808" },
+    { stage: 2, hot: ["grad"], hi: ["grad"], arrows: ["back"], tag: ["← loss.backward() 写入", 225],
+      say: "loss.backward() 给每个参数算梯度，写进这个参数的 p.grad。梯度是：参数往上加一点点，损失跟着变多少倍。w1 的梯度是 −0.8，w2 的梯度是 −0.008：两个都是负数，表示把参数往上加，损失会变小；w2 的梯度只有 w1 的百分之一。",
+      code: "loss.backward()   # w.grad = [−0.8, −0.008]" },
+    { stage: 3, hot: ["grad"], tag: ["总长度 0.80004 ≤ 1.0，不裁", 225],
+      say: "Trainer 在调用优化器之前，先算所有梯度合起来的长度：√(0.8² + 0.008²) ≈ 0.80004。TrainingArguments 默认 max_grad_norm = 1.0，长度超过 1.0 时，Trainer 把所有梯度按同一个比例缩小到长度 1.0。例子的长度没超过，梯度不变。",
+      code: "if self.args.max_grad_norm > 0:\n    grad_norm = self._clip_grad_norm(model)" },
+    { stage: 4, hot: ["opt", "par", "state"], hi: ["par", "state"], arrows: ["step"], tag: ["← optimizer.step() 改写", 145, true],
+      say: "optimizer.step() 读每个参数的梯度和优化器状态，算出每个参数挪多少，直接改写参数：w1、w2 都从 1 变成 1.099。优化器状态也被改写：step 变成 1，exp_avg 和 exp_avg_sq 有了数。w2 的梯度小 100 倍，却和 w1 挪得一样远，原因在“AdamW 怎么算”那一页。",
+      code: "self.optimizer.step()   # w = [1.099, 1.099]" },
+    { stage: 5, hot: ["sch"], hi: ["lr"], tag: ["例子里 lr 一直是 0.1", 525],
+      say: "lr_scheduler.step() 改下一步用的学习率 lr。TrainingArguments 默认 lr_scheduler_type = \"linear\"：lr 从起始值一步步减小，到最后一步减到 0。GRPOConfig 默认起始 lr = 1e-6。例子为了看清数，固定 lr = 0.1。",
+      code: "self.lr_scheduler.step()" },
+    { stage: 6, hot: ["grad"], tag: ["← model.zero_grad() 清空", 225],
+      say: "model.zero_grad() 把每个参数的 p.grad 清空。梯度只属于这一步；参数和优化器状态留下来。优化器状态就是优化器对过去梯度的记录。",
+      code: "model.zero_grad()" },
+    { stage: 7, hot: ["loss", "grad"], hi: ["loss", "grad"], arrows: ["back"], tag: ["← 新的梯度", 225],
+      say: "下一步训练：参数是 1.099，损失算出来是 0.730；loss.backward() 写入新的梯度：w1 是 −0.7604，w2 是 −0.007604。",
+      code: "loss.backward()   # w.grad = [−0.7604, −0.007604]" },
+    { stage: 8, hot: ["opt", "par", "state"], hi: ["par", "state"], arrows: ["step"], tag: ["← optimizer.step() 改写", 145, true],
+      say: "optimizer.step() 再读新的梯度和上一步留下的优化器状态，把 w1、w2 都改成 1.1977，把 step 改成 2。每一步都是这 4 件事：写梯度、裁梯度、改参数、清梯度。",
+      code: "self.optimizer.step()   # w = [1.1977, 1.1977]" }
+  ];
+
+  var NOTES = {
+    loss: n("损失 loss", [["是什么", "一个数，越小表示模型越好。训练就是把它往小推。"], ["例子", "0.2 × (w1 − 3)² + 0.002 × (w2 − 3)²。w1 = w2 = 1 时是 0.808。"], ["GRPO 里", "per_token_loss 汇总出来的那个数。"]]),
+    par: n("参数 w1、w2", [["是什么", "模型里的数，训练改的就是它们。"], ["谁改", "只有 optimizer.step() 改它们。"], ["例子", "开始都是 1，一步后都是 1.099。"]]),
+    grad: n("梯度 p.grad", [["是什么", "参数往上加一点点，损失变多少倍。负数表示参数变大、损失变小。"], ["谁写入", "loss.backward()。"], ["谁清空", "model.zero_grad()，每步一次。"], ["例子", "w1 的梯度 −0.8，w2 的梯度 −0.008。"]]),
+    opt: n("优化器 AdamW", [["是什么", "一个 Python 对象，记着要改哪些参数、学习率是多少，以及每个参数的优化器状态。"], ["谁创建", "Trainer 在训练开始时创建。TrainingArguments 默认 optim = \"adamw_torch\"（torch ≥ 2.8 时 \"adamw_torch_fused\"，算法相同）。"], ["做什么", "optimizer.step()：读梯度和优化器状态，改参数，改优化器状态。"]]),
+    state: n("优化器状态 state", [["是什么", "优化器给每个参数存的记录：step（走过几步）、exp_avg（梯度的平均）、exp_avg_sq（梯度平方的平均）。"], ["谁创建", "第一次 optimizer.step() 时创建，三个都从 0 开始。"], ["何时删", "不删，训练全程保留。"]]),
+    sch: n("学习率调度器 lr_scheduler", [["是什么", "每步改一次 lr 的对象。"], ["默认", "lr_scheduler_type = \"linear\"，warmup_steps = 0：lr 从起始值线性减到 0。"]]),
+    v_loss: n("损失的值", [["例子", "开始 0.808；一步后 0.730。"]]),
+    v_par: n("参数的值", [["例子", "开始 [1, 1]；第一步后 [1.099, 1.099]；第二步后 [1.1977, 1.1977]。"]]),
+    v_grad: n("梯度的值", [["例子", "第一步 [−0.8, −0.008]；第二步 [−0.7604, −0.007604]。清空后为空。"]]),
+    v_step: n("step", [["是什么", "这个参数被优化器改过几次。默认从 0 开始，每次 optimizer.step() 加 1。"]]),
+    v_ea: n("exp_avg", [["是什么", "梯度的平均：每步 0.9 × 旧值 + 0.1 × 新梯度。“AdamW 怎么算”那一页逐步算。"]]),
+    v_eq: n("exp_avg_sq", [["是什么", "梯度平方的平均：每步 0.999 × 旧值 + 0.001 × 新梯度²。"], ["例子", "6.4e-4 是 0.00064。"]]),
+    v_lr: n("学习率 lr", [["是什么", "每步挪多远的尺度。"], ["默认", "GRPOConfig 默认 1e-6；例子用 0.1。"]])
+  };
+
+  makeView({ key: "overview", viewBox: "0 0 1000 570", steps: STEPS, notes: NOTES, draw: draw,
+    h1: "一步训练里，优化器做什么",
+    gist: "本质上是，loss.backward() 把梯度写到每个参数上，optimizer.step() 读梯度把每个参数挪一小步，model.zero_grad() 再把梯度清掉，只有优化器状态留到下一步。",
+    legend: [["hot", "这一步讲到的部分"], ["proc", "正在运行的对象"], ["hi", "这一步改写的数"], ["info", "点框或数看说明"]] });
+})();
+
+/* ===== 第 2 页：SGD ===== */
+(function () {
+  var GX = 320, CW = 140;
+  var COLS = ["开始", "第 1 步后", "第 2 步后", "第 3 步后"];
+  var R = [
+    ["w1", ["1", "1.08", "1.1568", "1.2305"], "s_w1"],
+    ["w1 这一步的梯度", ["", "−0.8", "−0.768", "−0.7373"], "s_g1"],
+    ["w2", ["1", "1.0008", "1.0016", "1.0024"], "s_w2"],
+    ["w2 这一步的梯度", ["", "−0.008", "−0.007997", "−0.007994"], "s_g2"]
+  ];
+  function draw(A, root, s) {
+    A.mk("text", { "class": "gtitle", x: 40, y: 30 }, root, "规则：新参数 = 参数 − lr × 梯度（lr = 0.1）");
+    COLS.forEach(function (c, j) { A.mk("text", { "class": "colhead", x: GX + j * CW + CW / 2, y: 66, "text-anchor": "middle" }, root, c); });
+    R.forEach(function (r, i) {
+      var vals = r[1].map(function (v, j) { return j <= s.k ? v : ""; });
+      var hc = s.k >= 1 && s.k <= 3 ? [s.k] : [];
+      A.row(root, GX, 78 + i * 42, CW, r[0], vals, { hiCols: hc, id: r[2] });
+    });
+    if (s.bars) {
+      A.mk("text", { "class": "gtitle", x: 40, y: 290 }, root, "3 步以后，每个参数从 1 走到了哪里（右边绿线是 3）");
+      A.bar(root, 160, 310, 700, "w1", 1.2305, true);
+      A.bar(root, 160, 350, 700, "w2", 1.0024, true);
+    }
+  }
+  var STEPS = [
+    { k: 0,
+      say: "SGD 是最简单的优化器：每个参数减去 lr 乘以它的梯度。梯度是负数时，减去一个负数，参数变大；梯度是正数时，参数变小。两种情况都是往损失变小的方向挪。",
+      code: "param.add_(grad, alpha=-lr)   # torch.optim.SGD 的 _single_tensor_sgd 里，momentum = 0 时只做这一句" },
+    { k: 1,
+      say: "第 1 步：w1 = 1 − 0.1 × (−0.8) = 1.08，挪了 0.08；w2 = 1 − 0.1 × (−0.008) = 1.0008，挪了 0.0008。w2 的梯度是 w1 的百分之一，挪的距离也是 w1 的百分之一。",
+      code: "w.grad = [−0.8, −0.008]   →   w = [1.08, 1.0008]" },
+    { k: 2,
+      say: "第 2 步：loss.backward() 在新的参数上重新算梯度，w1 的梯度变成 −0.768（w1 离 3 近了一点，梯度变小）。w1 = 1.08 − 0.1 × (−0.768) = 1.1568。",
+      code: "w = [1.1568, 1.0016]" },
+    { k: 3,
+      say: "第 3 步以后：w1 = 1.2305，w2 = 1.0024。每一步 w1 挪 0.07 到 0.08，w2 只挪 0.0008。",
+      code: "w = [1.2305, 1.0024]" },
+    { k: 3, bars: true,
+      say: "问题在这里：w2 要走到 3，按每步 0.0008 要走两千多步。想让 w2 走快，得把 lr 调大 100 倍，可 w1 也用这个 lr，w1 每步挪 8，直接冲过 3。SGD 所有参数共用一个 lr。大模型里不同参数的梯度能差好几个数量级，所以 GRPO 默认用 AdamW。",
+      code: "torch.optim.SGD(params, lr=0.1)   # 只有一个 lr" }
+  ];
+  var NOTES = {
+    s_w1: n("w1", [["每步", "w1 − 0.1 × w1 的梯度。"], ["例子", "1 → 1.08 → 1.1568 → 1.2305。"]]),
+    s_g1: n("w1 这一步的梯度", [["是什么", "loss.backward() 在这一步的参数上算出的 w1 的梯度 = 0.4 × (w1 − 3)。"], ["例子", "w1 = 1 时是 0.4 × (−2) = −0.8。"]]),
+    s_w2: n("w2", [["每步", "w2 − 0.1 × w2 的梯度。"], ["例子", "1 → 1.0008 → 1.0016 → 1.0024。"]]),
+    s_g2: n("w2 这一步的梯度", [["是什么", "w2 的梯度 = 0.004 × (w2 − 3)。"], ["例子", "w2 = 1 时是 0.004 × (−2) = −0.008。"]])
+  };
+  makeView({ key: "sgd", viewBox: "0 0 1000 400", steps: STEPS, notes: NOTES, draw: draw,
+    h1: "SGD：所有参数共用一个步长",
+    gist: "本质上是，每个参数减去学习率乘以它的梯度：梯度大的参数挪得多，梯度小的参数挪得少。",
+    legend: [["hi", "这一步算出的数"], ["sgd", "SGD 走到的位置"], ["info", "点行看说明"]] });
+})();
+
+/* ===== 第 3 页：AdamW 怎么算 ===== */
+(function () {
+  var TX = 430, CW = 130, FX = 724;
+  var ROWS = [
+    ["grad_t = loss 对 w 求导", ["−0.8", "−0.008"], "0.4 × (1 − 3)", "a0"],
+    ["t ← t + 1", ["1"], "0 + 1", "a1"],
+    ["w_{t−1} ← w_{t−1} × (1 − α · weight_decay)", ["0.999", "0.999"], "1 × (1 − 0.1 × 0.01)", "a2"],
+    ["m_t = γ1 · m_{t−1} + (1 − γ1) · grad_t", ["−0.08", "−0.0008"], "0.9 × 0 + 0.1 × (−0.8)", "a3"],
+    ["v_t = γ2 · v_{t−1} + (1 − γ2) · grad_t²", ["6.4e-4", "6.4e-8"], "0.999 × 0 + 0.001 × 0.64", "a4"],
+    ["1 − γ1^t", ["0.1"], "1 − 0.9¹", "a5"],
+    ["1 − γ2^t", ["0.001"], "1 − 0.999¹", "a6"],
+    ["m̂_t = m_t ÷ (1 − γ1^t)", ["−0.8", "−0.008"], "−0.08 ÷ 0.1", "a7"],
+    ["v̂_t = v_t ÷ (1 − γ2^t)", ["0.64", "6.4e-5"], "0.00064 ÷ 0.001", "a8"],
+    ["√v̂_t + ε", ["0.8", "0.008"], "√0.64 + 1e-8", "a9"],
+    ["α ÷ (√v̂_t + ε) · m̂_t", ["−0.1", "−0.1"], "0.1 ÷ 0.8 × (−0.8)", "a10"],
+    ["w_t = w_{t−1} − α ÷ (√v̂_t + ε) · m̂_t", ["1.099", "1.099"], "0.999 − (−0.1)", "a11"]
+  ];
+  var THREE = [
+    ["w1 的 grad_t", ["−0.8", "−0.7604", "−0.7209"], "t0"],
+    ["w1 的 α ÷ (√v̂_t + ε) · m̂_t", ["−0.1000", "−0.0998", "−0.0995"], "t1"],
+    ["w1", ["1.0990", "1.1977", "1.2961"], "t2"],
+    ["w2 的 grad_t", ["−0.008", "−0.007604", "−0.007209"], "t3"],
+    ["w2 的 α ÷ (√v̂_t + ε) · m̂_t", ["−0.1000", "−0.0998", "−0.0995"], "t4"],
+    ["w2", ["1.0990", "1.1977", "1.2961"], "t5"]
+  ];
+  var FLIP = [
+    ["grad_t", ["+0.8", "−0.8"], "f0"],
+    ["m_t", ["+0.08", "−0.008"], "f1"],
+    ["v_t", ["6.4e-4", "1.279e-3"], "f2"],
+    ["α ÷ (√v̂_t + ε) · m̂_t", ["+0.1", "−0.0053"], "f3"]
+  ];
+
+  function draw(A, root, s) {
+    if (s.mode === "three" || s.mode === "flip") {
+      var T = s.mode === "three" ? THREE : FLIP;
+      var cols = s.mode === "three" ? ["t = 1", "t = 2", "t = 3"] : ["t = 1", "t = 2"];
+      if (s.mode === "flip") A.mk("text", { "class": "gtitle", x: 40, y: 24 }, root, "另一个例子：只有 1 个参数 w，grad_t 在 t = 1 是 +0.8，在 t = 2 是 −0.8（weight_decay = 0）");
+      cols.forEach(function (c, j) { A.mk("text", { "class": "colhead", x: TX + j * CW + CW / 2, y: 50, "text-anchor": "middle" }, root, c); });
+      T.forEach(function (r, i) { A.row(root, TX, 62 + i * 40, CW, r[0], r[1], { hiCols: s.mode === "flip" ? [1] : [], hi: s.mode === "three" && /α/.test(r[0]), id: r[2] }); });
+      if (s.mode === "three") {
+        A.mk("text", { "class": "gtitle", x: 40, y: 336 }, root, "3 步以后，每个参数从 1 走到了哪里（右边绿线是 3）");
+        A.bar(root, 160, 356, 700, "SGD w1", 1.2305, true);
+        A.bar(root, 160, 386, 700, "SGD w2", 1.0024, true);
+        A.bar(root, 160, 426, 700, "AdamW w1", 1.2961);
+        A.bar(root, 160, 456, 700, "AdamW w2", 1.2961);
+      }
+      return;
+    }
+    A.mk("text", { "class": "glabel", x: TX - 8, y: 14, "text-anchor": "end" }, root, "loss = 0.2 × (w1 − 3)² + 0.002 × (w2 − 3)²");
+    A.mk("text", { "class": "glabel", x: TX - 8, y: 32, "text-anchor": "end" }, root, "w1、w2 开始都是 1；α = 0.1，γ1 = 0.9，γ2 = 0.999");
+    A.mk("text", { "class": "glabel", x: TX - 8, y: 50, "text-anchor": "end" }, root, "ε = 1e-8，weight_decay = 0.01");
+    A.mk("text", { "class": "colhead", x: FX, y: 50 }, root, "w1 代入数字");
+    A.mk("text", { "class": "colhead", x: TX + CW / 2, y: 50, "text-anchor": "middle" }, root, "w1");
+    A.mk("text", { "class": "colhead", x: TX + CW * 1.5, y: 50, "text-anchor": "middle" }, root, "w2");
+    ROWS.forEach(function (r, i) {
+      if (i >= s.rows) return;
+      var single = r[1].length === 1;
+      A.row(root, TX, 64 + i * 42, single ? CW * 2 : CW, r[0], r[1], { hi: (s.hiRows || [s.rows - 1]).indexOf(i) >= 0, id: r[3] });
+      A.mk("text", { "class": "formula", x: FX, y: 64 + i * 42 + 19 }, root, r[2]);
+    });
+  }
+
+  var STEPS = [
+    { rows: 2, hiRows: [0, 1],
+      say: "loss.backward() 先对 loss 求导，算出 grad_t：w1 的是 0.4 × (w1 − 3) = 0.4 × (1 − 3) = −0.8，w2 的是 0.004 × (w2 − 3) = −0.008。然后第一次 optimizer.step() 开始：m、v、t 都从 0 开始，t 加 1 变成 1。",
+      code: "step_t += 1   # PyTorch 把 t 叫 step" },
+    { rows: 3,
+      say: "先做 weight decay（AdamW 里的 W）：w_{t−1} 乘以 1 − α · weight_decay = 1 − 0.1 × 0.01 = 0.999，w1、w2 都从 1 变成 0.999。这一乘让 w 每步往 0 缩一点，和 grad_t 无关。后面公式里的 w_{t−1} 用的是缩过的 0.999。",
+      code: "if weight_decay != 0:\n    if decoupled_weight_decay:\n        param.mul_(1 - lr * weight_decay)   # w_{t−1} ← w_{t−1} × (1 − α · weight_decay)，lr 就是 α" },
+    { rows: 4,
+      say: "算 m_t（grad_t 的平均）：m_t = γ1 · m_{t−1} + (1 − γ1) · grad_t。m_{t−1} 是 0，所以 w1 的 m_t = 0.1 × (−0.8) = −0.08，w2 的 m_t = 0.1 × (−0.008) = −0.0008。每一步新的 grad_t 只占 10%，所以偶尔一次 grad_t 方向反了，m_t 不会马上跟着反。",
+      code: "exp_avg.lerp_(grad, 1 - beta1)   # exp_avg 就是 m_t，beta1 就是 γ1" },
+    { rows: 5,
+      say: "算 v_t（grad_t² 的平均）：v_t = γ2 · v_{t−1} + (1 − γ2) · grad_t²。w1：0.001 × 0.64 = 0.00064（写作 6.4e-4）；w2：0.001 × 0.000064 = 6.4e-8。开平方以后，v_t 表示这个参数的 grad_t 平常有多大。",
+      code: "exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)   # exp_avg_sq 就是 v_t，beta2 就是 γ2" },
+    { rows: 9, hiRows: [5, 6, 7, 8],
+      say: "m_t 和 v_t 都从 0 开始，前几步偏小：m_t 只有 grad_t 的 0.1 倍。除以 1 − γ1^t = 0.1 和 1 − γ2^t = 0.001 补回来：m̂_t = −0.08 ÷ 0.1 = −0.8，正好是 grad_t；v̂_t = 0.00064 ÷ 0.001 = 0.64，正好是 grad_t²。t 越大，γ1^t 越接近 0，1 − γ1^t 越接近 1，这一除就不起作用了。",
+      code: "bias_correction1 = 1 - beta1**step   # 1 − γ1^t\nbias_correction2 = 1 - beta2**step   # 1 − γ2^t" },
+    { rows: 10, hiRows: [9],
+      say: "算 √v̂_t + ε：w1 是 √0.64 = 0.8，w2 是 √0.000064 = 0.008。√v̂_t 就是这个参数的 grad_t 平常有多大；ε = 1e-8 防止 grad_t 一直是 0 时除以 0。",
+      code: "denom = (exp_avg_sq.sqrt() / bias_correction2**0.5).add_(eps)   # √v_t ÷ √(1 − γ2^t) + ε = √v̂_t + ε" },
+    { rows: 12, hiRows: [10, 11],
+      say: "w_t = w_{t−1} − α ÷ (√v̂_t + ε) · m̂_t。w1：0.1 ÷ 0.8 × (−0.8) = −0.1，w_t = 0.999 − (−0.1) = 1.099；w2：0.1 ÷ 0.008 × (−0.008) = −0.1，也是 1.099。m̂_t 和 √v̂_t 都随 grad_t 的大小一起变大变小，相除以后大小抵消，只剩方向，所以两个参数都挪了 α = 0.1。PyTorch 没有单独算 m̂_t：它把 ÷ (1 − γ1^t) 并进 step_size，结果一样。",
+      code: "step_size = lr / bias_correction1   # α ÷ (1 − γ1^t)\nparam.addcdiv_(exp_avg, denom, value=-step_size)   # w_t = w_{t−1} − step_size × m_t ÷ denom" },
+    { mode: "three",
+      say: "接着走 3 步：每步 α ÷ (√v̂_t + ε) · m̂_t 都约是 −0.1，w1、w2 每步都挪大约 0.1，3 步后都到 1.2961。同样 3 步，SGD 把 w1 推到 1.2305，w2 只到 1.0024。AdamW 给每个参数按它自己的 grad_t 大小定步长，grad_t 大小差 100 倍的两个参数走得一样快。（表里的 α ÷ (√v̂_t + ε) · m̂_t 不含 weight decay 那一乘。）",
+      code: "torch.optim.AdamW([w], lr=0.1)   # 用 PyTorch 实际跑 3 步：w = [1.2961, 1.2961]" },
+    { mode: "flip",
+      say: "换一种情况：一个参数的 grad_t 在 t = 1 是 +0.8，在 t = 2 反过来是 −0.8。t = 1 时 α ÷ (√v̂_t + ε) · m̂_t = +0.1，w 减去它，挪了 −0.1。t = 2 时 m_t = 0.9 × 0.08 + 0.1 × (−0.8) = −0.008，正负两次差不多抵消了，这一项只有 −0.0053，w 只挪 +0.0053。grad_t 方向来回变时，m_t 接近 0，AdamW 就挪得很少；grad_t 方向一直不变时，每步挪接近 α。",
+      code: "# t = 2：0.1 ÷ (0.8 + 1e-8) × (−0.008 ÷ 0.19) ≈ −0.0053" }
+  ];
+
+  var NOTES = {
+    a0: n("grad_t", [["是什么", "第 t 步的梯度：loss 对这个参数求导的值。loss.backward() 把它写进 p.grad，optimizer.step() 从 p.grad 读它。"], ["例子", "0.2 × (w1 − 3)² 对 w1 求导是 0.4 × (w1 − 3)，w1 = 1 时是 −0.8；w2 同理是 0.004 × (w2 − 3) = −0.008。"]]),
+    a1: n("t", [["代码里的名字", "step。"], ["默认值", "0，第一次 optimizer.step() 时创建。"], ["怎么变", "每次 optimizer.step() 加 1。整个参数张量共用一个 t。"], ["用在哪", "算 1 − γ1^t 和 1 − γ2^t。"]]),
+    a2: n("w_{t−1} × (1 − α · weight_decay)", [["是什么", "weight decay：每步把 w 往 0 缩一点，和 grad_t 无关。"], ["默认值", "torch.optim.AdamW 默认 weight_decay = 0.01；TrainingArguments 默认 0.0；本项目设 0.01。"], ["和 Adam 的区别", "Adam 把 weight_decay × w 加进 grad_t；AdamW 直接乘在 w 上（decoupled_weight_decay = True）。"]]),
+    a3: n("m_t", [["是什么", "grad_t 的平均，记方向。"], ["代码里的名字", "exp_avg。"], ["默认值", "m_0 = 0。"], ["怎么变", "每步：γ1 · m_{t−1} + (1 − γ1) · grad_t。m_{t−1} 是上一步的 m。γ1 = 0.9 是 betas[0]，TrainingArguments 里叫 adam_beta1。"]]),
+    a4: n("v_t", [["是什么", "grad_t² 的平均，开平方后记大小。"], ["代码里的名字", "exp_avg_sq。"], ["默认值", "v_0 = 0。"], ["怎么变", "每步：γ2 · v_{t−1} + (1 − γ2) · grad_t²。γ2 = 0.999 是 betas[1]，TrainingArguments 里叫 adam_beta2。"]]),
+    a5: n("1 − γ1^t", [["是什么", "m_t 从 0 开始，前几步偏小；m_t 除以它补回来。"], ["代码里的名字", "bias_correction1。"], ["例子", "t = 1：0.1；t = 2：0.19；t = 3：0.271。"]]),
+    a6: n("1 − γ2^t", [["是什么", "v_t 除以它补回来。"], ["代码里的名字", "bias_correction2。"], ["例子", "t = 1：0.001；t = 2：0.001999。"]]),
+    a7: n("m̂_t", [["是什么", "m_t ÷ (1 − γ1^t)，补回来以后的 grad_t 平均。"], ["代码里", "PyTorch 不单独存 m̂_t，把 ÷ (1 − γ1^t) 并进 step_size = lr ÷ bias_correction1。"], ["例子", "t = 1：−0.08 ÷ 0.1 = −0.8。"]]),
+    a8: n("v̂_t", [["是什么", "v_t ÷ (1 − γ2^t)，补回来以后的 grad_t² 平均。"], ["代码里", "PyTorch 不单独存 v̂_t，算 denom 时用 √v_t ÷ √bias_correction2，等于 √v̂_t。"], ["例子", "t = 1：0.00064 ÷ 0.001 = 0.64。"]]),
+    a9: n("√v̂_t + ε", [["是什么", "这个参数的 grad_t 平常有多大。"], ["代码里的名字", "denom。"], ["ε", "默认 1e-8（TrainingArguments 里叫 adam_epsilon），防止除以 0。"]]),
+    a10: n("α ÷ (√v̂_t + ε) · m̂_t", [["是什么", "这一步 w 要减去的量。"], ["α", "学习率，代码里叫 lr。例子设 0.1。"], ["为什么大小接近 α", "grad_t 方向一直不变时，m̂_t 和 √v̂_t 一样大，相除得 ±1，这一项 ≈ ±α。"]]),
+    a11: n("w_t", [["是什么", "w_{t−1}（已乘过 1 − α · weight_decay）减去 α ÷ (√v̂_t + ε) · m̂_t。optimizer.step() 用 addcdiv_ 直接改写参数。"], ["例子", "0.999 − (−0.1) = 1.099。"]]),
+    t0: n("w1 的 grad_t", [["例子", "每步 loss.backward() 在新的 w1 上重新算：0.4 × (w1 − 3)。"]]),
+    t1: n("w1 的 α ÷ (√v̂_t + ε) · m̂_t", [["是什么", "每步 w1 减去的量，不含 weight decay 那一乘。"], ["例子", "每步约 −0.1，所以 w1 每步约加 0.1 = α。"]]),
+    t2: n("w1", [["例子", "1.099 → 1.1977 → 1.2961（PyTorch 实际跑出的数）。"]]),
+    t3: n("w2 的 grad_t", [["例子", "0.004 × (w2 − 3)，一直是 w1 的 grad_t 的百分之一。"]]),
+    t4: n("w2 的 α ÷ (√v̂_t + ε) · m̂_t", [["例子", "和 w1 一样，每步约 −0.1。"]]),
+    t5: n("w2", [["例子", "和 w1 一样：1.099 → 1.1977 → 1.2961。"]]),
+    f0: n("grad_t", [["例子", "t = 1 是 +0.8，t = 2 是 −0.8：方向反了。"]]),
+    f1: n("m_t", [["例子", "t = 1：0.1 × 0.8 = 0.08；t = 2：0.9 × 0.08 + 0.1 × (−0.8) = −0.008。"]]),
+    f2: n("v_t", [["例子", "t = 2：0.999 × 0.00064 + 0.001 × 0.64 ≈ 0.00128；v̂_t = 0.00128 ÷ 0.001999 ≈ 0.64，√v̂_t ≈ 0.8。"]]),
+    f3: n("α ÷ (√v̂_t + ε) · m̂_t", [["例子", "t = 1：m̂_t = 0.08 ÷ 0.1 = 0.8，0.1 ÷ 0.8 × 0.8 = +0.1；t = 2：m̂_t = −0.008 ÷ 0.19 ≈ −0.042，0.1 ÷ 0.8 × (−0.042) ≈ −0.0053。"]])
+  };
+
+  makeView({ key: "adamw", viewBox: "0 0 1000 574", steps: STEPS, notes: NOTES, draw: draw,
+    h1: "AdamW 怎么算：每个参数自己定步长",
+    gist: "本质上是，AdamW 先把 w 往 0 缩一点，再用 m̂_t（grad_t 的平均）÷ √v̂_t（grad_t 平常的大小）定方向，每步挪 α 那么远，所以 grad_t 大的参数和 grad_t 小的参数挪得一样远。",
+    legend: [["hi", "这一步算出的数"], ["sgd", "SGD 走到的位置"], ["adam", "AdamW 走到的位置"], ["info", "点行看说明"]] });
+  (function () {
+    var v = document.getElementById("adamw-view");
+    var box = document.createElement("div");
+    box.className = "basis";
+    box.innerHTML = "<div style=\"background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 20px 16px;display:flex;flex-direction:column;gap:4px;font-size:18px;\"><div style=\"font-size:14px;font-weight:700;color:var(--muted);margin-bottom:4px\">总依据：AdamW 每一步的公式，按计算顺序排</div><div data-f=\"0\" style=\"display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:4px 10px;border-radius:8px;border:1px solid transparent;transition:background .3s\"><span></span><span class=\"katex\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle scriptlevel=\"0\" displaystyle=\"true\"><mi>t</mi><mo>←</mo><mi>t</mi><mo>+</mo><mn>1</mn></mstyle></mrow><annotation encoding=\"application/x-tex\">\\displaystyle t \\leftarrow t + 1</annotation></semantics></math></span><span style=\"font-size:13px;color:var(--muted);padding-left:14px\"></span></div><div data-f=\"1\" style=\"display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:4px 10px;border-radius:8px;border:1px solid transparent;transition:background .3s\"><span></span><span class=\"katex\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle scriptlevel=\"0\" displaystyle=\"true\"><msub><mi>w</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>←</mo><msub><mi>w</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>×</mo><mo stretchy=\"false\">(</mo><mn>1</mn><mo>−</mo><mi>α</mi><mo>⋅</mo><mrow><mi mathvariant=\"normal\">w</mi><mi mathvariant=\"normal\">e</mi><mi mathvariant=\"normal\">i</mi><mi mathvariant=\"normal\">g</mi><mi mathvariant=\"normal\">h</mi><mi mathvariant=\"normal\">t</mi><mi mathvariant=\"normal\">_</mi><mi mathvariant=\"normal\">d</mi><mi mathvariant=\"normal\">e</mi><mi mathvariant=\"normal\">c</mi><mi mathvariant=\"normal\">a</mi><mi mathvariant=\"normal\">y</mi></mrow><mo stretchy=\"false\">)</mo></mstyle></mrow><annotation encoding=\"application/x-tex\">\\displaystyle w_{t-1} \\leftarrow w_{t-1}\\times(1-\\alpha\\cdot \\mathrm{weight\\_decay})</annotation></semantics></math></span><span style=\"font-size:13px;color:var(--muted);padding-left:14px\"></span></div><div data-f=\"2\" style=\"display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:4px 10px;border-radius:8px;border:1px solid transparent;transition:background .3s\"><span></span><span class=\"katex\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle scriptlevel=\"0\" displaystyle=\"true\"><msub><mi>m</mi><mi>t</mi></msub><mo>=</mo><msub><mi>γ</mi><mn>1</mn></msub><mtext> </mtext><msub><mi>m</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>+</mo><mo stretchy=\"false\">(</mo><mn>1</mn><mo>−</mo><msub><mi>γ</mi><mn>1</mn></msub><mo stretchy=\"false\">)</mo><mtext> </mtext><msub><mrow><mi mathvariant=\"normal\">g</mi><mi mathvariant=\"normal\">r</mi><mi mathvariant=\"normal\">a</mi><mi mathvariant=\"normal\">d</mi></mrow><mi>t</mi></msub></mstyle></mrow><annotation encoding=\"application/x-tex\">\\displaystyle m_t = \\gamma_1\\, m_{t-1} + (1-\\gamma_1)\\,\\mathrm{grad}_t</annotation></semantics></math></span><span style=\"font-size:13px;color:var(--muted);padding-left:14px\"></span></div><div data-f=\"3\" style=\"display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:4px 10px;border-radius:8px;border:1px solid transparent;transition:background .3s\"><span></span><span class=\"katex\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle scriptlevel=\"0\" displaystyle=\"true\"><msub><mi>v</mi><mi>t</mi></msub><mo>=</mo><msub><mi>γ</mi><mn>2</mn></msub><mtext> </mtext><msub><mi>v</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>+</mo><mo stretchy=\"false\">(</mo><mn>1</mn><mo>−</mo><msub><mi>γ</mi><mn>2</mn></msub><mo stretchy=\"false\">)</mo><mtext> </mtext><msubsup><mrow><mi mathvariant=\"normal\">g</mi><mi mathvariant=\"normal\">r</mi><mi mathvariant=\"normal\">a</mi><mi mathvariant=\"normal\">d</mi></mrow><mi>t</mi><mn>2</mn></msubsup></mstyle></mrow><annotation encoding=\"application/x-tex\">\\displaystyle v_t = \\gamma_2\\, v_{t-1} + (1-\\gamma_2)\\,\\mathrm{grad}_t^{2}</annotation></semantics></math></span><span style=\"font-size:13px;color:var(--muted);padding-left:14px\"></span></div><div data-f=\"4\" style=\"display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:4px 10px;border-radius:8px;border:1px solid transparent;transition:background .3s\"><span></span><span class=\"katex\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle scriptlevel=\"0\" displaystyle=\"true\"><msub><mover accent=\"true\"><mi>m</mi><mo>^</mo></mover><mi>t</mi></msub><mo>=</mo><mfrac><msub><mi>m</mi><mi>t</mi></msub><mrow><mn>1</mn><mo>−</mo><msubsup><mi>γ</mi><mn>1</mn><mi>t</mi></msubsup></mrow></mfrac></mstyle></mrow><annotation encoding=\"application/x-tex\">\\displaystyle \\hat{m}_t = \\frac{m_t}{1-\\gamma_1^{t}}</annotation></semantics></math></span><span style=\"font-size:13px;color:var(--muted);padding-left:14px\"></span></div><div data-f=\"5\" style=\"display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:4px 10px;border-radius:8px;border:1px solid transparent;transition:background .3s\"><span></span><span class=\"katex\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle scriptlevel=\"0\" displaystyle=\"true\"><msub><mover accent=\"true\"><mi>v</mi><mo>^</mo></mover><mi>t</mi></msub><mo>=</mo><mfrac><msub><mi>v</mi><mi>t</mi></msub><mrow><mn>1</mn><mo>−</mo><msubsup><mi>γ</mi><mn>2</mn><mi>t</mi></msubsup></mrow></mfrac></mstyle></mrow><annotation encoding=\"application/x-tex\">\\displaystyle \\hat{v}_t = \\frac{v_t}{1-\\gamma_2^{t}}</annotation></semantics></math></span><span style=\"font-size:13px;color:var(--muted);padding-left:14px\"></span></div><div data-f=\"6\" style=\"display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:4px 10px;border-radius:8px;border:1px solid transparent;transition:background .3s\"><span></span><span class=\"katex\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mstyle scriptlevel=\"0\" displaystyle=\"true\"><msub><mi>w</mi><mi>t</mi></msub><mo>=</mo><msub><mi>w</mi><mrow><mi>t</mi><mo>−</mo><mn>1</mn></mrow></msub><mo>−</mo><mfrac><mi>α</mi><mrow><msqrt><msub><mover accent=\"true\"><mi>v</mi><mo>^</mo></mover><mi>t</mi></msub></msqrt><mo>+</mo><mi>ε</mi></mrow></mfrac><mtext> </mtext><msub><mover accent=\"true\"><mi>m</mi><mo>^</mo></mover><mi>t</mi></msub></mstyle></mrow><annotation encoding=\"application/x-tex\">\\displaystyle w_t = w_{t-1} - \\frac{\\alpha}{\\sqrt{\\hat{v}_t}+\\varepsilon}\\,\\hat{m}_t</annotation></semantics></math></span><span style=\"font-size:13px;color:var(--muted);padding-left:14px\"></span></div></div>";
+    v.querySelector('[data-r="gist"]').after(box);
+    /* 第几步（从 0 数）用到第几行公式 */
+    var USE = [[0], [1], [2], [3], [4, 5], [6], [6], [2, 3, 4, 5, 6], [2, 3, 4, 5, 6]];
+    var count = v.querySelector('[data-r="count"]');
+    function mark() {
+      var i = parseInt(count.textContent, 10) - 1;
+      box.querySelectorAll("[data-f]").forEach(function (el) {
+        var on = (USE[i] || []).indexOf(+el.getAttribute("data-f")) >= 0;
+        el.style.background = on ? "color-mix(in srgb, var(--warm) 22%, var(--panel))" : "";
+        el.style.borderColor = on ? "var(--warm)" : "transparent";
+      });
+    }
+    new MutationObserver(mark).observe(count, { childList: true, characterData: true, subtree: true });
+    mark();
+  })();
+})();
+
+/* ===== 第 4 页：本项目一步训练：32 个回答、16 次累积、1 次更新 ===== */
+(function () {
+  var X0 = 70, CW = 27;
+  /* 32 个回答属于第几道题：生成时同一道题的 8 个连在一起 */
+  var GEN = [0,0,0,0,0,0,0,0, 1,1,1,1,1,1,1,1, 2,2,2,2,2,2,2,2, 3,3,3,3,3,3,3,3];
+  /* 打乱以后的顺序（示意） */
+  var SHUF = [2,0,3,1, 1,3,0,2, 0,2,1,3, 3,1,2,0, 1,0,3,2, 2,3,0,1, 3,2,1,0, 0,1,2,3];
+  var LR0 = 5e-6;
+  function lrAt(n) { return LR0 * (401 - n) / 400; }
+  function lrText(v) {
+    if (v === 0) return "0";
+    var e = Math.floor(Math.log10(v)), m = v / Math.pow(10, e);
+    return (+m.toFixed(5)).toString() + "e" + e;
+  }
+
+  function draw(A, root, s) {
+    var S = { on: ["model", "grad", "opt"], hot: s.hot || [] };
+    // 生成的 32 个回答
+    A.mk("text", { "class": "gtitle", x: X0, y: 26 }, root, "vLLM 一次生成的 32 个回答（格子里的数：这个回答属于第几道题）");
+    A.row(root, X0, 36, CW, "", GEN, { hi: s.gen, id: "gen32" });
+    // 切成 16 份
+    A.mk("text", { "class": "gtitle", x: X0, y: 96 }, root, s.split ? "TRL 打乱顺序后切成 16 份，每份 2 个" : "还没切份");
+    if (s.split) {
+      for (var k = 0; k < 16; k++) {
+        A.mk("text", { "class": "glabel", x: X0 + k * 2 * CW + CW, y: 116, "text-anchor": "middle" }, root, String(k + 1));
+      }
+      var hc = [];
+      (s.cur || []).forEach(function (k) { hc.push(2 * k, 2 * k + 1); });
+      A.row(root, X0, 122, CW, "", SHUF, { hiCols: hc, id: "slots" });
+      for (var j = 1; j < 16; j++) {
+        A.mk("line", { x1: X0 + j * 2 * CW, y1: 118, x2: X0 + j * 2 * CW, y2: 154, stroke: "var(--ink)", "stroke-width": 2 }, root);
+      }
+    }
+    // 训练模型、p.grad、AdamW
+    A.box(root, S, "model", X0, 184, 250, 60, "训练模型 self.model", "给 2 个回答打分、算损失");
+    A.box(root, S, "grad", 375, 184, 250, 60, "梯度 p.grad", "每个参数上加着的梯度");
+    A.box(root, S, "opt", 680, 184, 250, 60, "优化器 AdamW", "optimizer.step() 改参数", { proc: true });
+    A.mk("rect", { "class": "track", x: 375, y: 254, width: 250, height: 18, rx: 4 }, root);
+    if (s.acc) A.mk("rect", { "class": "fill", x: 375, y: 254, width: 250 * s.acc / 16, height: 18, rx: 4 }, root);
+    A.mk("text", { "class": "glabel", x: 375, y: 290 }, root, s.acc ? "p.grad 已加 " + s.acc + " / 16 份" : "p.grad 是空的");
+    A.row(root, 690, 254, 230, "", ["lr = " + lrText(lrAt(s.lr))], { hi: s.lrHi, id: "lr" });
+    var a = s.arrows || [];
+    if (a.indexOf("gen") >= 0) A.arrow(root, "M" + (X0 - 30) + " 50 V136 H" + (X0 - 6));
+    if (a.indexOf("toModel") >= 0) {
+      var k0 = (s.cur || [0])[0];
+      var cx = X0 + k0 * 2 * CW + CW;
+      A.arrow(root, "M" + cx + " 154 V166 H" + (X0 + 125) + " V180");
+    }
+    if (a.indexOf("toGrad") >= 0) A.arrow(root, "M" + (X0 + 252) + " 214 H371");
+    if (a.indexOf("toOpt") >= 0) A.arrow(root, "M627 214 H676", true);
+    // 学习率曲线
+    var cx0 = 110, cx1 = 900, cy0 = 372, cy1 = 530;
+    var px = function (n) { return cx0 + (n - 1) / 399 * (cx1 - cx0); };
+    var py = function (v) { return cy1 - v / LR0 * (cy1 - cy0); };
+    A.mk("text", { "class": "gtitle", x: X0, y: 330 }, root, "学习率随步数的变化：第 n 步用 5e-6 × (401 − n) ÷ 400");
+    A.mk("line", { x1: cx0, y1: cy1, x2: cx1, y2: cy1, stroke: "var(--line)", "stroke-width": 1.5 }, root);
+    A.mk("line", { x1: cx0, y1: cy0 - 6, x2: cx0, y2: cy1, stroke: "var(--line)", "stroke-width": 1.5 }, root);
+    [[LR0, "5e-6"], [LR0 / 2, "2.5e-6"], [0, "0"]].forEach(function (t) {
+      A.mk("text", { "class": "glabel", x: cx0 - 8, y: py(t[0]) + 4, "text-anchor": "end" }, root, t[1]);
+    });
+    [1, 100, 200, 300, 400].forEach(function (n) {
+      A.mk("text", { "class": "glabel", x: px(n), y: cy1 + 18, "text-anchor": "middle" }, root, "第 " + n + " 步");
+    });
+    A.mk("path", { "class": "link", d: "M" + px(1) + " " + py(lrAt(1)) + " L" + px(400) + " " + py(lrAt(400)), "marker-end": "" }, root);
+    (s.dots || [s.lr]).forEach(function (n) {
+      A.mk("circle", { "class": "fill", cx: px(n), cy: py(lrAt(n)), r: 6 }, root);
+      var right = n > 300, top = n <= 3;
+      A.mk("text", { "class": "glabel", x: px(n) + (right ? -12 : 12), y: py(lrAt(n)) + (right ? -40 : -14), "text-anchor": right ? "end" : "start" }, root, "第 " + n + " 步：" + lrText(lrAt(n)));
+    });
+  }
+
+  var STEPS = [
+    { gen: true, lr: 2, arrows: [],
+      say: "例子是 GRPO 正式运行日志里的第 2 步。这一步开始时，vLLM 一次给 4 道题各写 8 个回答，一共写出 32 个回答。同一道题的 8 个回答在 32 行里连在一起。",
+      code: "generation_batch = self._generate_and_score_completions(generation_batch)   # GRPOTrainer._prepare_inputs：一次传入 32 行" },
+    { split: true, arrows: ["gen"], lr: 2,
+      say: "TRL 把这 32 个回答打乱顺序，再切成 16 份，每份 2 个回答。每份放几个由 per_device_train_batch_size = 2 决定，份数就是 32 ÷ 2 = 16。打乱以后，同一道题的回答分散到不同的份里。",
+      code: "generation_batch = shuffle_sequence_dict(generation_batch)\nself._buffered_inputs = split_tensor_dict(generation_batch, self.args.steps_per_generation)   # 16 份" },
+    { split: true, cur: [0], acc: 1, hot: ["model", "grad"], arrows: ["toModel", "toGrad"], lr: 2,
+      say: "第 1 次 training_step：训练模型拿第 1 份的 2 个回答，算出这 2 个回答的平均损失，再把它除以 16。loss.backward() 把这份损失的梯度加到每个参数的 p.grad 上。这一次 Trainer 不调用 optimizer.step()，参数不变。",
+      code: "loss = ((per_token_loss * mask).sum(-1) / mask.sum(-1)).mean() / 16   # GRPOTrainer._compute_loss\nloss.backward()" },
+    { split: true, cur: [15], acc: 16, hot: ["model", "grad"], arrows: ["toModel", "toGrad"], lr: 2,
+      say: "第 2 到第 16 次 training_step 重复同样的事：训练模型每次拿下一份的 2 个回答，算损失、除以 16、backward，新的梯度接着加在 p.grad 上。16 份的损失各除以 16 再加起来，正好等于 32 个回答的平均损失，所以加满 16 份以后，p.grad 就是 32 个回答平均损失的梯度。",
+      code: "inputs = self._buffered_inputs[self._step % self.args.steps_per_generation]   # 第 2 … 16 份" },
+    { split: true, acc: 16, hot: ["grad", "opt"], arrows: ["toOpt"], lr: 2, lrHi: true,
+      say: "16 份加满后，Trainer 先算 p.grad 的总长度：日志记的第 2 步 grad_norm 是 1.766，超过 max_grad_norm = 1.0，Trainer 把所有梯度按同一个比例缩到总长度 1.0。然后 Trainer 调用 optimizer.step()：AdamW 先把每个参数乘以 1 − 4.9875e-6 × 0.01，再按 p.grad 把每个参数挪大约一个学习率 4.9875e-6 那么远。",
+      code: "grad_norm = self._clip_grad_norm(model)   # max_grad_norm = 1.0\nself.optimizer.step()   # lr = 4.9875e-6，weight_decay = 0.01" },
+    { split: true, acc: 0, hot: ["grad"], lr: 3, lrHi: true,
+      say: "改完参数后，Trainer 调用 lr_scheduler.step()，把学习率从 4.9875e-6 改成第 3 步要用的 4.975e-6。Trainer 再调用 model.zero_grad()，把每个参数的 p.grad 清空。",
+      code: "self.lr_scheduler.step()   # lr：4.9875e-6 → 4.975e-6\nmodel.zero_grad()" },
+    { gen: true, lr: 3,
+      say: "第 3 步开始时，训练不再使用第 2 步的 32 个回答（num_iterations = 1）。vLLM 拿到刚改过的参数，写出 32 个新回答，然后重复上面的过程。正式运行一共 400 步，所以 AdamW 一共改 400 次参数。",
+      code: "GRPOConfig(num_iterations=1, max_steps=400)" },
+    { lr: 400, dots: [1, 200, 400], lrHi: true,
+      say: "学习率每步减少 5e-6 ÷ 400 = 1.25e-8：第 1 步用 5e-6，第 200 步用 2.5125e-6，第 400 步用 1.25e-8。第 400 步改完参数后，lr_scheduler.step() 把学习率改成 0，但这时训练已经结束，学习率 0 没有被任何一次更新用到。warmup 是 0 步，所以学习率从第 1 步就是 5e-6，没有先升后降。",
+      code: "GRPOConfig(learning_rate=a.lr, lr_scheduler_type=\"linear\")   # --lr 默认 5e-6；warmup_steps 默认 0" }
+  ];
+
+  var NOTES = {
+    gen32: n("vLLM 一次生成的 32 个回答", [
+      ["是什么", "每一步训练开始时，vLLM 一次写出的全部回答。32 = 4 道题（--prompts-per-rollout 4）× 每题 8 个（num_generations = 8）。"],
+      ["谁生成", "GRPOTrainer._prepare_inputs 在每步第 1 次 training_step 时调用 _generate_and_score_completions，一次生成这 32 个。"],
+      ["用多久", "只用这一步；下一步 vLLM 写 32 个新回答（num_iterations = 1）。"]]),
+    slots: n("16 份，每份 2 个（_buffered_inputs）", [
+      ["是什么", "32 个回答打乱顺序后切成的 16 份。每份 2 个由 per_device_train_batch_size = 2 决定。"],
+      ["怎么变", "每步第 1 次 training_step 时写入；第 k 次 training_step 拿第 k 份；下一步生成时整个换掉。"],
+      ["例子", "图里格子打乱后的顺序是示意，日志没有记录真实的顺序。"]]),
+    model: n("训练模型 self.model", [
+      ["是什么", "正在训练的 Qwen2.5-1.5B。每次 training_step 给 2 个回答的每个 token 打分，算出损失。"],
+      ["一次放几个", "2 个回答，为了省显存；生成时是一次 32 个。"]]),
+    grad: n("梯度 p.grad", [
+      ["默认值", "每步开始时是空的。"],
+      ["怎么变", "每次 loss.backward() 把这份损失的梯度加上去；加满 16 份后 optimizer.step() 读它；model.zero_grad() 把它清空。"],
+      ["例子", "第 2 步加满后总长度 1.766（日志 grad_norm），Trainer 把它缩到 1.0。"]]),
+    opt: n("优化器 AdamW", [
+      ["是什么", "optim = \"adamw_torch_fused\"，beta1 = 0.9，beta2 = 0.999，epsilon = 1e-8，weight_decay = 0.01。"],
+      ["什么时候改参数", "每 16 次 training_step 调一次 optimizer.step()，一步训练改一次参数。"],
+      ["怎么算", "见“AdamW 怎么算”那一页：每个参数每次挪大约一个学习率那么远。"]]),
+    lr: n("学习率 lr", [
+      ["默认值", "第 1 步 5e-6：--lr 的默认值，train.py 用 learning_rate = a.lr 交给 TRL。"],
+      ["怎么变", "lr_scheduler_type = \"linear\"，warmup 0 步：每次 optimizer.step() 之后，lr_scheduler.step() 把学习率减 1.25e-8。第 n 步用 5e-6 × (401 − n) ÷ 400。"],
+      ["日志里的值", { pre: "第 1 步    5e-06\n第 2 步    4.988e-06\n第 3 步    4.975e-06\n第 200 步  2.513e-06\n第 400 步  1.25e-08" }]])
+  };
+
+  makeView({ key: "batch", viewBox: "0 0 1000 570", steps: STEPS, notes: NOTES, draw: draw,
+    h1: "本项目一步训练：32 个回答、16 次累积、1 次更新",
+    gist: "本质上是，vLLM 一次写好 32 个回答，训练模型分 16 次、每次拿 2 个回答算损失，把梯度一直加在参数上，加满 16 次后 AdamW 按当前学习率把参数改一次。",
+    legend: [["hot", "这一步讲到的部分"], ["proc", "正在运行的对象"], ["hi", "这一步用到的格子或数"], ["info", "点框或数看说明"]] });
+})();
+</script>
+<script>
+(function () {
+  var TABS = [{ key: "overview", title: "优化器：一步训练里的优化器" }, { key: "sgd", title: "优化器：SGD" }, { key: "adamw", title: "优化器：AdamW 怎么算" }, { key: "batch", title: "优化器：本项目的 32 个回答、16 次累积、学习率" }], active = TABS[0].key;
+  window.__setHash = function (key, k) {
+    if (key !== active) return;
+    try { history.replaceState(null, "", "#" + key + "-" + k); } catch (e) {}
+  };
+  function activate(key, step) {
+    active = key;
+    TABS.forEach(function (t) {
+      document.getElementById(t.key + "-view").hidden = (t.key !== key);
+      document.getElementById("tab-" + t.key).setAttribute("aria-selected", t.key === key ? "true" : "false");
+      if (t.key === key) document.title = t.title;
+    });
+    var v = window.__v[key];
+    v.show(step === undefined ? v.cur() : step - 1);
+  }
+  TABS.forEach(function (t) {
+    document.getElementById("tab-" + t.key).addEventListener("click", function () { activate(t.key); window.scrollTo(0, 0); });
+  });
+  function fromHash() {
+    var m = /^#([a-z]+)(?:-(\d+))?$/.exec(location.hash);
+    if (m && window.__v[m[1]]) activate(m[1], m[2] ? parseInt(m[2], 10) : undefined);
+    else activate(active);
+  }
+  window.addEventListener("hashchange", fromHash);
+  fromHash();
+})();
+</script>
+</body>
+</html>
