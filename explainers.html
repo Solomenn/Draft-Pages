@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>讲解页</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #16202b; --muted: #5d6b7a; --line: #c9d1da; --accent: #0b6e8a;
+    --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --sbw: 260px; --sb: var(--sbw);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f151b; --panel: #161e26; --ink: #e6edf3; --muted: #93a1b0; --line: #2c3844; --accent: #4cc0df; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+  body.closed { --sb: 0px; }
+
+  .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: var(--sbw); background: var(--panel); border-right: 1px solid var(--line); padding: 64px 12px 16px; display: flex; flex-direction: column; gap: 4px; transition: transform .25s; z-index: 20; }
+  body.closed .sidebar { transform: translateX(-100%); }
+  .item { display: block; text-align: left; font-family: var(--font-body); font-size: 15px; line-height: 1.4; padding: 10px 14px; border-radius: 10px; border: 0; background: none; color: var(--ink); cursor: pointer; }
+  .item:hover { background: var(--bg); }
+  .item[aria-current="page"] { background: var(--accent); color: #fff; font-weight: 700; }
+  @media (prefers-color-scheme: dark) { .item[aria-current="page"] { color: #0f151b; } }
+
+  .toggle { position: fixed; left: 12px; top: 12px; z-index: 30; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; }
+  .toggle:hover { border-color: var(--accent); color: var(--accent); }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  .page { position: fixed; top: 0; left: var(--sb); width: calc(100vw - var(--sb)); height: 100vh; border: 0; background: var(--bg); transition: left .25s, width .25s; }
+  @media (max-width: 699px) { .page { left: 0; width: 100vw; } }
+  @media (prefers-reduced-motion: reduce) { .sidebar, .page { transition: none; } }
+</style>
+</head>
+<body>
+<button class="toggle" id="toggle" aria-label="收起目录" aria-controls="sidebar" aria-expanded="true">
+  <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="15" height="13" rx="2"></rect><path d="M7.5 3.5v13"></path></svg>
+</button>
+<nav class="sidebar" id="sidebar" aria-label="目录">
+  <button class="item" data-key="popo">POPO 项目</button>
+  <button class="item" data-key="rsi">RSI 项目</button>
+  <button class="item" data-key="optimizer">优化器原理</button>
+  <button class="item" data-key="transformer">Transformer 与编码器解码器</button>
+  <button class="item" data-key="rl">强化学习全貌</button>
+  <button class="item" data-key="ppo">PPO 原理</button>
+  <button class="item" data-key="dpo">DPO 原理</button>
+  <button class="item" data-key="grpo">GRPO 原理</button>
+  <button class="item" data-key="agentic-rl">Agentic RL 原理</button>
+</nav>
+<iframe class="page" id="page" title="讲解页"></iframe>
+<script>
+(function () {
+  var PAGES = {
+    popo: { src: "popo/index.html", title: "POPO 项目" },
+    rsi: { src: "rsi/index.html", title: "RSI 项目" },
+    optimizer: { src: "optimizer/index.html", title: "优化器原理" },
+    transformer: { src: "transformer/index.html", title: "Transformer 与编码器解码器" },
+    rl: { src: "rl/index.html", title: "强化学习全貌" },
+    ppo: { src: "ppo/index.html", title: "PPO 原理" },
+    dpo: { src: "dpo/index.html", title: "DPO 原理" },
+    grpo: { src: "grpo/index.html", title: "GRPO 原理" },
+    "agentic-rl": { src: "agentic-rl/index.html", title: "Agentic RL 原理" }
+  };
+  var page = document.getElementById("page"), toggle = document.getElementById("toggle");
+  var narrow = window.matchMedia("(max-width: 699px)");
+
+  function setClosed(closed) {
+    document.body.classList.toggle("closed", closed);
+    toggle.setAttribute("aria-expanded", closed ? "false" : "true");
+    toggle.setAttribute("aria-label", closed ? "展开目录" : "收起目录");
+  }
+  function open(key) {
+    if (!PAGES[key]) key = "popo";
+    if (page.getAttribute("src") !== PAGES[key].src) page.setAttribute("src", PAGES[key].src);
+    document.title = PAGES[key].title;
+    document.querySelectorAll(".item").forEach(function (b) {
+      if (b.getAttribute("data-key") === key) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+    });
+    if (location.hash !== "#" + key) { try { history.replaceState(null, "", "#" + key); } catch (e) {} }
+    if (narrow.matches) setClosed(true);
+  }
+  document.querySelectorAll(".item").forEach(function (b) {
+    b.addEventListener("click", function () { open(b.getAttribute("data-key")); });
+  });
+  toggle.addEventListener("click", function () { setClosed(!document.body.classList.contains("closed")); });
+  window.addEventListener("hashchange", function () { open(location.hash.slice(1)); });
+  setClosed(narrow.matches);
+  open(location.hash.slice(1));
+})();
+</script>
+</body>
+</html>
