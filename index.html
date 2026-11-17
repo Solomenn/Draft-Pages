@@ -30,34 +30,21 @@
   .grid { width: 100%; max-width: 980px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
   @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; }
-  h2 { margin: 0 0 14px; font-size: 18px; }
-  .list { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
-  .list a { display: block; padding: 10px 12px; border-radius: 10px; color: var(--ink); text-decoration: none; font-size: 15px; }
-  .list a:hover { background: var(--bg); color: var(--accent); }
   .big { display: flex; flex-direction: column; justify-content: center; text-decoration: none; color: var(--ink); min-height: 260px; transition: border-color .2s; }
   .big:hover { border-color: var(--accent); }
   .big .name { font-size: 24px; font-weight: 700; line-height: 1.35; }
-  .big .part { margin-top: 10px; color: var(--muted); font-size: 15px; }
+  .big .part { margin-top: 10px; color: var(--muted); font-size: 15px; line-height: 1.7; }
   .big .go { margin-top: 24px; color: var(--accent); }
   a:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 </style>
 </head>
 <body>
 <main class="grid">
-  <section class="card">
-    <h2>讲解页</h2>
-    <ul class="list">
-      <li><a href="explainers.html#popo">POPO 项目</a></li>
-      <li><a href="explainers.html#rsi">RSI 项目</a></li>
-      <li><a href="explainers.html#optimizer">优化器原理</a></li>
-      <li><a href="explainers.html#transformer">Transformer 与编码器解码器</a></li>
-      <li><a href="explainers.html#rl">强化学习全貌</a></li>
-      <li><a href="explainers.html#ppo">PPO 原理</a></li>
-      <li><a href="explainers.html#dpo">DPO 原理</a></li>
-      <li><a href="explainers.html#grpo">GRPO 原理</a></li>
-      <li><a href="explainers.html#agentic-rl">Agentic RL 原理</a></li>
-    </ul>
-  </section>
+  <a class="card big" href="explainers.html">
+    <span class="name">讲解页</span>
+    <span class="part">POPO 项目、RSI 项目、优化器原理、Transformer 与编码器解码器、强化学习全貌、PPO 原理、DPO 原理、GRPO 原理、Agentic RL 原理</span>
+    <svg class="go" width="28" height="28" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 10h12M11 5l5 5-5 5"></path></svg>
+  </a>
   <a class="card big" href="napkin/index.html">
     <span class="name">An Infinitely Large Napkin</span>
     <span class="part">第 I–XIV 部分</span>
