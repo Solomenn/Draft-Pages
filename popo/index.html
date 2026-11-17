@@ -273,12 +273,8 @@
   <button class="tab" role="tab" id="tab-replay" aria-selected="false">POPO 死组重放</button>
   <button class="tab" role="tab" id="tab-opd" aria-selected="false">OPD 运行机制</button>
   <button class="tab" role="tab" id="tab-io" aria-selected="false">交给模型与模型输出</button>
-  <button class="tab" role="tab" id="tab-opt" aria-selected="false">优化器</button>
 </nav>
 <div class="wrap">
-<div class="view" id="g-view" hidden style="max-width:none;padding-inline:0">
-  <iframe src="optimizer.html" title="优化器逐步讲解" style="display:block;width:100%;height:calc(100vh - 150px);min-height:560px;border:0"></iframe>
-</div>
 <div class="view" id="b-view">
   <h1>POPO-OPD-Relay 从备题到出图的全过程</h1>
   <p class="gist">本质上是，先把题库切成训练题和测试题两个文件（里面 3 个数字和 4 个数字的题混在一起，读的时候只留 3 个数字的），用训练题把 1.5B 模型训成教师，再让教师逐个 token 带 0.5B 学生；每个训练出的模型都拿同一份 1,477 道测试题去答，答对数最后汇总成表和图。</p>
@@ -2475,9 +2471,9 @@ There we go! That's exactly what we needed.
 })();
 
 (function () {
-  var KEYS = ["popo", "grpo", "trl", "replay", "opd", "io", "opt"], active = "popo";
-  var VIEW = { popo: "b-view", grpo: "a-view", trl: "c-view", replay: "d-view", opd: "e-view", io: "f-view", opt: "g-view" };
-  var TITLE = { popo: "POPO-OPD-Relay 项目运行逐步讲解", grpo: "GRPOTrainer 运行机制逐步讲解", trl: "POPOTrainer 和 OPDTrainer 怎么接到 TRL 上", replay: "POPO 死组重放逐步讲解", opd: "OPD 运行机制逐步讲解", io: "POPO-OPD-Relay：交给模型的是什么，模型输出的是什么", opt: "优化器逐步讲解" };
+  var KEYS = ["popo", "grpo", "trl", "replay", "opd", "io"], active = "popo";
+  var VIEW = { popo: "b-view", grpo: "a-view", trl: "c-view", replay: "d-view", opd: "e-view", io: "f-view" };
+  var TITLE = { popo: "POPO-OPD-Relay 项目运行逐步讲解", grpo: "GRPOTrainer 运行机制逐步讲解", trl: "POPOTrainer 和 OPDTrainer 怎么接到 TRL 上", replay: "POPO 死组重放逐步讲解", opd: "OPD 运行机制逐步讲解", io: "POPO-OPD-Relay：交给模型的是什么，模型输出的是什么" };
   window.__setHash = function (key, n) {
     if (key !== active) return;
     try { history.replaceState(null, "", "#" + key + "-" + n); } catch (e) {}
@@ -2498,7 +2494,7 @@ There we go! That's exactly what we needed.
     document.getElementById("tab-" + k).addEventListener("click", function () { activate(k); window.scrollTo(0, 0); });
   });
   function fromHash() {
-    var m = /^#(popo|grpo|trl|replay|opd|io|opt)(?:-(\d+))?$/.exec(location.hash);
+    var m = /^#(popo|grpo|trl|replay|opd|io)(?:-(\d+))?$/.exec(location.hash);
     if (m) activate(m[1], m[2] ? parseInt(m[2], 10) : undefined);
     else activate(active);
   }
