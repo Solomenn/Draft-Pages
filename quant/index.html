@@ -100,13 +100,24 @@
     .nav .next { right: calc(50% - 592px); }
   }
   @media (prefers-reduced-motion: reduce) { #draw > * { animation: none; } }
+  .tabs { position: sticky; top: 0; z-index: 10; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding: 14px 16px 12px; background: var(--bg); border-bottom: 1px solid var(--line); }
+  .tab { font-family: var(--font-body); font-size: 14px; padding: 7px 18px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+  .tab:hover { border-color: var(--accent); }
+  .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0f151b; } }
+  .legend[hidden] { display: none; }
 </style>
 </head>
 <body>
+<nav class="tabs" role="tablist" aria-label="切换页面">
+  <button class="tab" role="tab" id="tab-nf4" aria-selected="true">NF4 量化</button>
+  <button class="tab" role="tab" id="tab-double" aria-selected="false">双重量化</button>
+  <button class="tab" role="tab" id="tab-paged" aria-selected="false">分页优化器</button>
+</nav>
 <div class="wrap">
 <div class="view">
   <h1>QLoRA：NF4 量化、双重量化和分页优化器</h1>
-  <p class="gist">本质上是，先把每一块权重缩放到 −1 到 1，再在一把中间密、两头疏的 16 格刻度尺上找最近的刻度，只记下这个刻度的编号（0–15，正好 4 bit）；用的时候按编号查刻度表，再乘回这一块的缩放值。</p>
+  <p class="gist" id="gist">本质上是，先把每一块权重缩放到 −1 到 1，再在一把中间密、两头疏的 16 格刻度尺上找最近的刻度，只记下这个刻度的编号（0–15，正好 4 bit）；用的时候按编号查刻度表，再乘回这一块的缩放值。</p>
   <div class="legend" id="legend"></div>
   <div class="stage">
     <svg class="diagram" id="diagram" viewBox="0 0 1000 520" role="img" aria-label="NF4 量化逐步演示">
@@ -433,34 +444,52 @@ var STEPS = [
     code: "import bitsandbytes as bnb\noptimizer = bnb.optim.PagedAdamW32bit(lora_params, lr=2e-4)\n# 用 transformers 时：TrainingArguments(optim=\"paged_adamw_32bit\")" }
 ];
 
-/* ===== 翻页 ===== */
-var cur = 0;
+/* ===== 三个标签页：每个标签页管着 STEPS 里的哪几步（数字是 STEPS 里的序号） ===== */
+var TABS = {
+  nf4:    { steps: [0, 1, 2, 3, 4, 5, 6, 8, 9],
+            gist: "本质上是，先把每一块权重缩放到 −1 到 1，再在一把中间密、两头疏的 16 格刻度尺上找最近的刻度，只记下这个刻度的编号（0–15，正好 4 bit）；用的时候按编号查刻度表，再乘回这一块的缩放值。" },
+  double: { steps: [7],
+            gist: "本质上是，每一块的缩放值 absmax 本身也要占内存，把这些 absmax 再量化成 8 bit，平均每个权重多占的内存就从 0.5 bit 降到约 0.127 bit。" },
+  paged:  { steps: [10],
+            gist: "本质上是，显存快满的时候，优化器状态按页自动挪到 CPU 内存，要用的时候再挪回显存，所以遇到很长的序列也不会因为显存不够而中断训练。" }
+};
+var KEYS = ["nf4", "double", "paged"], tab = "nf4", cur = 0;
 function show(i) {
-  cur = Math.max(0, Math.min(STEPS.length - 1, i));
-  var s = STEPS[cur];
+  var list = TABS[tab].steps;
+  cur = Math.max(0, Math.min(list.length - 1, i));
+  var s = STEPS[list[cur]];
   root.textContent = "";
   s.draw();
   var say = document.getElementById("say");
   say.textContent = s.say;
   document.getElementById("code").textContent = s.code;
-  document.getElementById("count").textContent = (cur + 1) + " / " + STEPS.length;
+  document.getElementById("count").textContent = (cur + 1) + " / " + list.length;
   document.getElementById("prev").disabled = cur === 0;
-  document.getElementById("next").disabled = cur === STEPS.length - 1;
+  document.getElementById("next").disabled = cur === list.length - 1;
   var dots = document.getElementById("dots").children;
   for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
   if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([say]).catch(function () {});
 }
-STEPS.forEach(function (_, i) { var b = document.createElement("button"); b.setAttribute("aria-label", "第 " + (i + 1) + " 步"); b.addEventListener("click", function () { show(i); }); document.getElementById("dots").appendChild(b); });
+function activate(key) {
+  tab = key;
+  KEYS.forEach(function (k) { document.getElementById("tab-" + k).setAttribute("aria-selected", k === key ? "true" : "false"); });
+  document.getElementById("gist").textContent = TABS[key].gist;
+  document.getElementById("legend").hidden = key !== "nf4";
+  var d = document.getElementById("dots"); d.textContent = "";
+  TABS[key].steps.forEach(function (_, i) { var b = document.createElement("button"); b.setAttribute("aria-label", "第 " + (i + 1) + " 步"); b.addEventListener("click", function () { show(i); }); d.appendChild(b); });
+  show(0);
+}
+KEYS.forEach(function (k) { document.getElementById("tab-" + k).addEventListener("click", function () { activate(k); window.scrollTo(0, 0); }); });
 document.getElementById("prev").addEventListener("click", function () { show(cur - 1); });
 document.getElementById("next").addEventListener("click", function () { show(cur + 1); });
 document.addEventListener("keydown", function (e) { if (e.key === "ArrowRight") show(cur + 1); if (e.key === "ArrowLeft") show(cur - 1); });
 [["sw hi", "跟着看的数"], ["sw out", "异常值"], ["sw zero", "索引号挤在 0 附近"]].forEach(function (it) {
   var s = document.createElement("span"), sw = document.createElement("i"); sw.className = it[0]; s.appendChild(sw); s.appendChild(document.createTextNode(it[1])); document.getElementById("legend").appendChild(s);
 });
-show(0);
+activate("nf4");
 /* MathJax 异步加载完后，把当前这一步的公式也排一遍 */
 (function waitMJ(n) { if (window.MathJax && MathJax.typesetPromise) { MathJax.typesetPromise([document.getElementById("say")]).catch(function () {}); } else if (n < 50) setTimeout(function () { waitMJ(n + 1); }, 200); })(0);
-window.__show = show;
+window.__show = show; window.__activate = activate;
 </script>
 </body>
 </html>
