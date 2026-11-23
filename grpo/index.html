@@ -174,12 +174,34 @@
   .tab:hover { border-color: var(--accent); }
   .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0f151b; } }
+
+  /* 为什么取较小（m-view）：四种情况逐步算 */
+  #m-view .stage { overflow-x: auto; padding: 14px; }
+  #m-view table { border-collapse: separate; border-spacing: 6px; width: 100%; min-width: 760px; table-layout: fixed; }
+  #m-view th { font-weight: 700; font-size: 14px; text-align: center; padding: 4px 2px 6px; vertical-align: bottom; }
+  #m-view th .sub { display: block; font-weight: 400; color: var(--muted); font-size: 13px; margin-top: 2px; }
+  #m-view th.rowhead { width: 210px; }
+  #m-view td.label { font-size: 14px; font-weight: 500; text-align: right; padding-right: 8px; line-height: 1.4; }
+  #m-view td.label .sub { display: block; font-weight: 400; color: var(--muted); font-size: 12.5px; }
+  #m-view td.cell { border: 1px solid var(--line); border-radius: 8px; text-align: center; padding: 8px 6px; font-family: var(--font-code); font-size: 15px; line-height: 1.35; height: 58px; }
+  #m-view td.cell .sub { display: block; font-family: var(--font-body); font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  #m-view td.cell.hi { background: color-mix(in srgb, var(--warm) 18%, var(--panel)); border-color: var(--warm); }
+  #m-view td.cell.cut { background: color-mix(in srgb, var(--bad) 12%, var(--panel)); border: 2px solid var(--bad); color: var(--bad); font-weight: 600; }
+  #m-view td.cell.ok { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 2px solid var(--accent); color: var(--accent); font-weight: 600; }
+  #m-view td.cell.cut .sub, #m-view td.cell.ok .sub { color: inherit; font-weight: 500; }
+  #m-view tr.new td { animation: fadein .45s; }
+  #m-view .legend .sw.hi { background: color-mix(in srgb, var(--warm) 18%, var(--panel)); border: 1px solid var(--warm); }
+  #m-view .legend .sw.cut { background: color-mix(in srgb, var(--bad) 12%, var(--panel)); border: 2px solid var(--bad); }
+  #m-view .legend .sw.ok { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 2px solid var(--accent); }
+  #m-view .caption .say { font-size: 18px; line-height: 1.7; max-width: 44em; }
+  @media (prefers-reduced-motion: reduce) { #m-view tr.new td { animation: none; } }
 </style>
 <body>
 <nav class="tabs" role="tablist" aria-label="切换页面">
   <button class="tab" role="tab" id="tab-overview" aria-selected="true">整体：GRPO 一步训练</button>
   <button class="tab" role="tab" id="tab-advantage" aria-selected="false">优势怎么算</button>
   <button class="tab" role="tab" id="tab-update" aria-selected="false">策略怎么更新</button>
+  <button class="tab" role="tab" id="tab-min" aria-selected="false">为什么取较小</button>
 </nav>
 <div class="wrap">
 <div class="view" id="o-view">
@@ -264,6 +286,26 @@
     <div class="dots" id="u-dots"></div>
     <span class="count" id="u-count"></span>
     <button class="arrow-btn next" id="u-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="m-view" hidden>
+  <h1>GRPO 为什么取较小：四种情况逐步算</h1>
+  <p class="gist">本质上是，截断后的比率 × 优势一旦被截成常数，模型怎么改它都不变；取较小让模型只在“往对的方向改够了”时拿到这个常数而停手，往错的方向改了时拿到比率 × 优势，继续被拉回来。</p>
+  <div class="legend" aria-label="图例">
+    <span><i class="sw hi"></i>这一步算出的数</span>
+    <span><i class="sw cut"></i>常数：模型改不动它，梯度为 0</span>
+    <span><i class="sw ok"></i>跟着比率变：梯度还在</span>
+  </div>
+  <div class="stage"><table id="m-grid" aria-live="polite"></table></div>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="m-say"></p>
+    <p class="code" id="m-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="m-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="m-dots"></div>
+    <span class="count" id="m-count"></span>
+    <button class="arrow-btn next" id="m-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
   </div>
 </div>
 </div>
@@ -732,7 +774,113 @@ function n(title, rows) { return { title: title, rows: rows }; }
 </script>
 <script>
 (function () {
-  var TABS = [{"key": "overview", "p": "o", "title": "GRPO 整体：GRPO 一步训练"}, {"key": "advantage", "p": "c", "title": "GRPO 优势怎么算"}, {"key": "update", "p": "u", "title": "GRPO 策略怎么更新"}], active = TABS[0].key;
+  var EPS = 0.2, DR = 0.01;
+  var CASES = [
+    { A: 1, r: 1.5, name: "情况 1", sub: "好回答，比率已经涨多了" },
+    { A: 1, r: 0.5, name: "情况 2", sub: "好回答，比率反而降了" },
+    { A: -1, r: 0.5, name: "情况 3", sub: "差回答，比率已经降多了" },
+    { A: -1, r: 1.5, name: "情况 4", sub: "差回答，比率反而涨了" }
+  ];
+  function clip(r) { return Math.min(Math.max(r, 1 - EPS), 1 + EPS); }
+  function f(v) { var s = (Math.round(v * 100) / 100).toString(); return s.replace("-", "−"); }
+  function minOf(c, r) { return Math.min(r * c.A, clip(r) * c.A); }
+  function pickedClip(c) { return clip(c.r) * c.A < c.r * c.A; }
+
+  var ROWS = {
+    A: { label: "优势 Â", sub: "好回答为正，差回答为负", cell: function (c) { return { v: f(c.A) }; } },
+    r: { label: "比率 r", sub: "新概率 ÷ 旧概率", cell: function (c) { return { v: f(c.r) }; } },
+    rA: { label: "比率 × 优势", sub: "r × Â", cell: function (c) { return { v: f(c.r * c.A), s: f(c.r) + " × " + f(c.A) }; } },
+    cA: { label: "截断后的比率 × 优势", sub: "比率先截到 0.8 到 1.2", cell: function (c) { return { v: f(clip(c.r) * c.A), s: "比率 " + f(c.r) + " 截成 " + f(clip(c.r)), k: "cut" }; } },
+    mn: { label: "取较小", sub: "两行里小的那个", cell: function (c) {
+      return pickedClip(c) ? { v: f(minOf(c, c.r)), s: "取到截断后的", k: "cut" } : { v: f(minOf(c, c.r)), s: "取到比率 × 优势", k: "ok" }; } },
+    mn2: { label: "比率推高 0.01 后的取较小", sub: "比率 + 0.01 再算一遍", cell: function (c) {
+      var r2 = c.r + DR, a = r2 * c.A, b = clip(r2) * c.A;
+      return { v: f(Math.min(a, b)), s: "比较 " + f(a) + " 和 " + f(b) }; } },
+    ch: { label: "取较小变没变", sub: "", cell: function (c) {
+      return pickedClip(c) ? { v: "没变", s: "梯度为 0，停手", k: "cut" }
+        : { v: "变了", s: c.A > 0 ? "梯度还在，继续把比率往上拉" : "梯度还在，继续把比率往下压", k: "ok" }; } },
+    cA2: { label: "只用截断：比率推高 0.01 后", sub: "截断后的比率 × 优势", cell: function (c) {
+      return { v: f(clip(c.r + DR) * c.A), s: "比率 " + f(c.r + DR) + " 截成 " + f(clip(c.r + DR)) }; } },
+    ch2: { label: "只用截断：变没变", sub: "", cell: function (c) {
+      var wrong = (c.A > 0 && c.r < 1) || (c.A < 0 && c.r > 1);
+      return { v: "没变", s: wrong ? "梯度为 0，改错了也不管" : "梯度为 0，停手", k: "cut" }; } },
+    resMin: { label: "取较小的结果", sub: "", cell: function (c) { return ROWS.ch.cell(c); } },
+    resClip: { label: "只用截断的结果", sub: "", cell: function (c) { return ROWS.ch2.cell(c); } }
+  };
+
+  var STEPS = [
+    { rows: ["A", "r"], hi: ["A", "r"],
+      say: "先摆出四个 token，ε = 0.2，比率的范围是 0.8 到 1.2。比率 = 新模型给这个 token 的概率 ÷ 旧模型给这个 token 的概率。四种情况的比率都已经跑出了这个范围：情况 1 和情况 3 是往对的方向跑出去的，情况 2 和情况 4 是往错的方向跑出去的。",
+      code: "coef_1 = torch.exp(per_token_logps - old_per_token_logps)   # 比率 r" },
+    { rows: ["A", "r", "rA"], hi: ["rA"],
+      say: "第一行：比率 × 优势。比如情况 1，1.5 × 1 = 1.5。这一行里一直有比率 r，模型改参数、比率跟着变，这一行的数就跟着变。",
+      code: "per_token_loss1 = coef_1 * advantages" },
+    { rows: ["A", "r", "rA", "cA"], hi: [],
+      say: "第二行：截断后的比率 × 优势。比率先被截到 0.8 到 1.2 之间：1.5 截成 1.2，0.5 截成 0.8。四种情况的比率都在范围外，所以这一行四个数都是常数，比率再怎么变，这一行都不变。",
+      code: "coef_2 = torch.clamp(coef_1, 1 - 0.2, 1 + 0.2)\nper_token_loss2 = coef_2 * advantages" },
+    { rows: ["A", "r", "rA", "cA", "mn"], hi: [],
+      say: "每个 token 在两行里取较小的那个。情况 1：1.5 和 1.2 取 1.2，取到截断后的常数。情况 2：0.5 和 0.8 取 0.5，取到比率 × 优势。情况 3：−0.5 和 −0.8 取 −0.8，取到常数。情况 4：−1.5 和 −1.2 取 −1.5，取到比率 × 优势。",
+      code: "per_token_loss = -torch.min(per_token_loss1, per_token_loss2)" },
+    { rows: ["A", "r", "rA", "cA", "mn", "mn2", "ch"], hi: ["mn2"],
+      say: "判断梯度在不在：把比率推高 0.01，看取较小变没变。没变，说明模型改参数改变不了这一项，梯度为 0，这个 token 不再推动模型。变了，梯度就还在，模型会朝让取较小变大的方向改：情况 2 把比率往上拉回，情况 4 把比率往下压回。",
+      code: "# 取到常数：梯度为 0\n# 取到比率 × 优势：梯度还在" },
+    { rows: ["A", "r", "cA", "cA2", "ch2"], hi: ["cA2"],
+      say: "如果不取较小，只用截断后的比率 × 优势：四个数都是常数，比率推高 0.01 以后四个数都没变，四个 token 全部梯度为 0。情况 1 和情况 3 停手是对的；情况 2 和情况 4 是往错的方向改了，也没有任何一项把它们拉回来。",
+      code: "per_token_loss = -coef_2 * advantages   # 只用截断：四种情况都停手" },
+    { rows: ["A", "r", "resMin", "resClip"], hi: [],
+      say: "对比两种写法：情况 1 和情况 3 结果一样，都停手。情况 2 和情况 4 不一样：取较小会把比率拉回来，只用截断就不管了。所以取较小的作用是：往对的方向改够了就停，往错的方向改了照常拉回。",
+      code: "per_token_loss = -torch.min(coef_1 * advantages, coef_2 * advantages)" }
+  ];
+
+  function $(id) { return document.getElementById("m-" + id); }
+  var cur = 0, grid = $("grid");
+  function show(i) {
+    cur = Math.max(0, Math.min(STEPS.length - 1, i));
+    var s = STEPS[cur], prev = cur > 0 ? STEPS[cur - 1].rows : [];
+    var h = "<thead><tr><th class=\"rowhead\"></th>";
+    CASES.forEach(function (c) { h += "<th>" + c.name + "<span class=\"sub\">" + c.sub + "</span></th>"; });
+    h += "</tr></thead><tbody>";
+    s.rows.forEach(function (key) {
+      var R = ROWS[key], isNew = prev.indexOf(key) < 0;
+      h += "<tr" + (isNew ? " class=\"new\"" : "") + "><td class=\"label\">" + R.label + (R.sub ? "<span class=\"sub\">" + R.sub + "</span>" : "") + "</td>";
+      CASES.forEach(function (c) {
+        var x = R.cell(c), k = x.k || (s.hi.indexOf(key) >= 0 ? "hi" : "");
+        if (key === "cA" && cur < 2) k = "";
+        h += "<td class=\"cell " + k + "\">" + x.v + (x.s ? "<span class=\"sub\">" + x.s + "</span>" : "") + "</td>";
+      });
+      h += "</tr>";
+    });
+    grid.innerHTML = h + "</tbody>";
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + STEPS.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === STEPS.length - 1;
+    var d = $("dots").children;
+    for (var k = 0; k < d.length; k++) { d[k].classList.toggle("now", k === cur); d[k].classList.toggle("done", k < cur); }
+    if (window.__setHash) window.__setHash("min", cur + 1);
+  }
+  STEPS.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 步");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+  });
+  show(0);
+  window.__v = window.__v || {};
+  window.__v.min = { show: show, cur: function () { return cur; } };
+})();
+</script>
+<script>
+(function () {
+  var TABS = [{"key": "overview", "p": "o", "title": "GRPO 整体：GRPO 一步训练"}, {"key": "advantage", "p": "c", "title": "GRPO 优势怎么算"}, {"key": "update", "p": "u", "title": "GRPO 策略怎么更新"}, {"key": "min", "p": "m", "title": "GRPO 为什么取较小"}], active = TABS[0].key;
   window.__setHash = function (key, n) {
     if (key !== active) return;
     try { history.replaceState(null, "", "#" + key + "-" + n); } catch (e) {}
