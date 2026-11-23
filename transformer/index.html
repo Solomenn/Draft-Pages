@@ -164,6 +164,30 @@
   .tab:hover { border-color: var(--accent); }
   .tab[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .tab[aria-selected="true"] { color: #0f151b; } }
+
+  /* KV Cache：训练和推理（k-view） */
+  #k-view .stage { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; padding: 14px; overflow-x: auto; }
+  @media (max-width: 820px) { #k-view .stage { grid-template-columns: 1fr; } }
+  #k-view .blocktitle { font-size: 14px; font-weight: 700; margin: 2px 0 8px; }
+  #k-view .blocktitle .sub { font-weight: 400; color: var(--muted); font-size: 13px; margin-left: 6px; }
+  #k-view table { border-collapse: separate; border-spacing: 5px; width: 100%; table-layout: fixed; }
+  #k-view th { font-size: 13px; font-weight: 500; color: var(--muted); }
+  #k-view td.label, #k-view th.label { font-size: 13.5px; font-weight: 500; text-align: right; padding-right: 6px; width: 92px; color: var(--ink); }
+  #k-view td.kc { border: 1px solid var(--line); border-radius: 7px; text-align: center; padding: 7px 3px; font-family: var(--font-code); font-size: 13.5px; height: 40px; transition: background .3s, border-color .3s; }
+  #k-view td.kc.tok { font-family: var(--font-body); font-size: 16px; font-weight: 700; }
+  #k-view td.kc.hi { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); border: 2px solid var(--warm); }
+  #k-view td.kc.ok { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 2px solid var(--accent); color: var(--accent); font-weight: 600; }
+  #k-view td.kc.cut { background: color-mix(in srgb, var(--bad) 12%, var(--panel)); border: 2px solid var(--bad); color: var(--bad); font-weight: 600; }
+  #k-view td.kc.masked { background: var(--line); color: var(--muted); border-color: var(--line); }
+  #k-view td.kc.empty { border: 1.5px dashed var(--muted); color: var(--muted); background: transparent; }
+  #k-view td.kc.dim, #k-view td.kc.unused { color: var(--muted); }
+  #k-view .ksw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; border: 1px solid var(--line); }
+  #k-view .ksw.hi { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); border: 2px solid var(--warm); }
+  #k-view .ksw.ok { background: color-mix(in srgb, var(--accent) 14%, var(--panel)); border: 2px solid var(--accent); }
+  #k-view .ksw.cut { background: color-mix(in srgb, var(--bad) 12%, var(--panel)); border: 2px solid var(--bad); }
+  #k-view .ksw.masked { background: var(--line); }
+  #k-view .ksw.empty { border: 1.5px dashed var(--muted); }
+  #k-view .caption .say { font-size: 18px; line-height: 1.7; max-width: 44em; }
 </style>
 </head>
 <body>
@@ -173,6 +197,7 @@
   <button class="tab" role="tab" id="tab-encoder" aria-selected="false">编码器一层</button>
   <button class="tab" role="tab" id="tab-decoder" aria-selected="false">解码器一层</button>
   <button class="tab" role="tab" id="tab-deconly" aria-selected="false">单纯解码器模型</button>
+  <button class="tab" role="tab" id="tab-kvcache" aria-selected="false">KV Cache：训练和推理</button>
 </nav>
 <div class="wrap">
 <div class="view" id="o-view">
@@ -313,6 +338,37 @@
     <div class="dots" id="g-dots"></div>
     <span class="count" id="g-count"></span>
     <button class="arrow-btn next" id="g-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+<div class="view" id="k-view" hidden>
+  <h1>训练和推理：为什么只有推理需要 KV Cache</h1>
+  <p class="gist">本质上是，训练时整句话“我 爱 北 京”事先全都知道，一次算完所有位置的 K、V，这次算完就结束了，没有下一步再用它们；推理时下一个 token 要等上一个生成出来才知道，每步都要看前面所有 token 的 K、V，所以把算过的 K、V 存进 KV Cache，下一步直接取。</p>
+  <div class="legend" aria-label="图例">
+    <span><i class="ksw hi"></i>这一步新算的</span>
+    <span><i class="ksw ok"></i>从 KV Cache 取的</span>
+    <span><i class="ksw cut"></i>没有 KV Cache 时要重新算的</span>
+    <span><i class="ksw masked"></i>被因果掩码挡住，不看</span>
+    <span><i class="ksw empty"></i>还不知道</span>
+  </div>
+  <div class="stage">
+    <div>
+      <p class="blocktitle">每个位置的 Q、K、V<span class="sub" id="k-leftsub"></span></p>
+      <table id="k-qkv"></table>
+    </div>
+    <div>
+      <p class="blocktitle">注意力：谁看谁<span class="sub">行 = 用谁的 Q，列 = 看谁的 K、V</span></p>
+      <table id="k-att"></table>
+    </div>
+  </div>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="k-say"></p>
+    <p class="code" id="k-code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="k-prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="k-dots"></div>
+    <span class="count" id="k-count"></span>
+    <button class="arrow-btn next" id="k-next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
   </div>
 </div>
 </div>
@@ -1141,8 +1197,116 @@ function stackGrids(A, root, items, x, y) {
 </script>
 <script>
 (function () {
-  var KEYS = ["overview", "attention", "encoder", "decoder", "deconly"], active = "overview";
-  var TITLE = { overview: "Transformer 整体：编码器和解码器", attention: "Transformer 注意力怎么算", encoder: "Transformer 编码器一层逐步讲解", decoder: "Transformer 解码器一层逐步讲解", deconly: "单纯解码器模型和编码器 + 解码器模型的区别" };
+  var TOK = ["我", "爱", "北", "京"], NEXT = ["爱", "北", "京", "。"];
+  function all(v) { return [v, v, v, v]; }
+  var TR = "训练：一次前向", IN = "推理：prompt = “我 爱”";
+  var STEPS = [
+    { sub: TR, tok: all("hi"), q: all("empty"), k: all("empty"), v: all("empty"), cache: null, out: all("empty"), att: "none",
+      say: "先看训练。训练数据“我 爱 北 京”是给好的答案文本，4 个 token 全都已知，不用等模型自己生成。所以把 4 个 token 一起送进模型。",
+      code: "input_ids = [我, 爱, 北, 京]   # 4 个位置一次送进去" },
+    { sub: TR, tok: all(""), q: all("hi"), k: all("hi"), v: all("hi"), cache: null, out: all("empty"), att: "none",
+      say: "一次矩阵乘法同时算出 4 个位置的 Q、K、V。4 个位置之间互不等待，这就是“并行”。",
+      code: "q, k, v = x @ W_q, x @ W_k, x @ W_v   # x 是 4 个位置的向量叠在一起" },
+    { sub: TR, tok: all(""), q: all(""), k: all(""), v: all(""), cache: null, out: all("empty"), att: "allhi",
+      say: "注意力加因果掩码：位置 1 只看位置 1，位置 2 看 1–2，位置 3 看 1–3，位置 4 看 1–4。右上角被掩码挡住，位置看不到自己后面的 token。左下角 10 格在这一次里全部同时算完。",
+      code: "scores = q @ k.T / sqrt(d)\nscores = scores.masked_fill(causal_mask, -inf)   # 挡住右上角\nout = softmax(scores) @ v" },
+    { sub: TR, tok: all(""), q: all(""), k: all(""), v: all(""), cache: null, out: all("hi"), att: "all",
+      say: "4 个位置同时输出各自对下一个 token 的预测：位置 1 预测“爱”，位置 2 预测“北”，位置 3 预测“京”，位置 4 预测“。”。每个预测和真实答案比较，算出损失。",
+      code: "logits = lm_head(out)   # 4 个位置各出一个预测\nloss = cross_entropy(logits, [爱, 北, 京, 。])" },
+    { sub: TR, tok: all(""), q: all("dim"), k: all("dim"), v: all("dim"), cache: null, out: all(""), att: "all",
+      say: "这一次前向到这里结束。下一条训练数据是另一句话，和“我 爱 北 京”的 K、V 无关，没有下一步要复用它们，所以不需要 KV Cache。这些中间结果在反向传播算梯度时还会用到（显存不够时会扔掉再重算），但那是同一次训练内部的事，不是 KV Cache。",
+      code: "loss.backward()   # 反向传播用的是这一次前向的中间结果\n# 下一条数据：另一句话，从头再算" },
+    { sub: IN, tokText: ["我", "爱", "?", "?"], tok: ["hi", "hi", "empty", "empty"], q: all("empty"), k: all("empty"), v: all("empty"), cache: all("empty"), out: all("empty"), att: "none",
+      say: "再看推理。用户给的 prompt 是“我 爱”。这 2 个 token 已知，后面 2 个还不知道，要靠模型自己一个一个生成。",
+      code: "input_ids = [我, 爱]" },
+    { sub: IN, tokText: ["我", "爱", "?", "?"], tok: ["", "", "empty", "empty"], q: ["hi", "hi", "empty", "empty"], k: ["hi", "hi", "empty", "empty"], v: ["hi", "hi", "empty", "empty"], cache: ["hi", "hi", "empty", "empty"], cacheText: ["存入", "存入", "", ""], out: ["", "hi", "empty", "empty"], outText: ["", "北", "", ""], att: [[1, 0, 0, 0], [1, 1, 0, 0]],
+      say: "prefill：prompt 的 2 个 token 已知，和训练一样一次并行算出它们的 Q、K、V，算注意力。只有最后一个位置的预测有用，它生成了“北”。同时把“我”“爱”的 K、V 存进 KV Cache。",
+      code: "out = model(input_ids=[我, 爱], use_cache=True)\ncache = out.past_key_values   # 存着“我”“爱”的 K、V" },
+    { sub: IN, tokText: ["我", "爱", "北", "?"], tok: ["", "", "hi", "empty"], q: ["unused", "unused", "hi", "empty"], k: ["ok", "ok", "hi", "empty"], v: ["ok", "ok", "hi", "empty"], cache: ["ok", "ok", "hi", "empty"], cacheText: ["已存", "已存", "存入", ""], out: ["", "", "hi", "empty"], outText: ["", "", "京", ""], att: [[2, 0, 0, 0], [2, 2, 0, 0], [3, 3, 1, 0]],
+      say: "decode 第 1 步：只把新 token“北”送进模型，只算“北”的 Q、K、V。“北”的注意力要看“我”“爱”“北”3 个位置的 K、V，其中“我”“爱”的直接从 KV Cache 取。注意力矩阵只新算第 3 行。生成“京”，把“北”的 K、V 存进 KV Cache。",
+      code: "out = model(input_ids=[北], past_key_values=cache, use_cache=True)" },
+    { sub: IN, tokText: ["我", "爱", "北", "京"], tok: ["", "", "", "hi"], q: ["unused", "unused", "unused", "hi"], k: ["ok", "ok", "ok", "hi"], v: ["ok", "ok", "ok", "hi"], cache: ["ok", "ok", "ok", "hi"], cacheText: ["已存", "已存", "已存", "存入"], out: ["", "", "", "hi"], outText: ["", "", "", "。"], att: [[2, 0, 0, 0], [2, 2, 0, 0], [2, 2, 2, 0], [3, 3, 3, 1]],
+      say: "decode 第 2 步：同样只算新 token“京”的 Q、K、V，“我”“爱”“北”的 K、V 从 KV Cache 取，只新算注意力矩阵第 4 行。旧位置的 Q 不再用（表里写着“不再用”），因为旧位置不再预测任何东西，所以 KV Cache 只存 K、V，不存 Q。",
+      code: "out = model(input_ids=[京], past_key_values=cache, use_cache=True)   # 一直这样，直到生成结束" },
+    { sub: IN, tokText: ["我", "爱", "北", "京"], tok: ["", "", "", "hi"], q: ["unused", "unused", "unused", "hi"], k: ["cut", "cut", "cut", "hi"], v: ["cut", "cut", "cut", "hi"], cache: all("empty"), cacheText: ["", "", "", ""], out: ["", "", "", "hi"], outText: ["", "", "", "。"], att: [[2, 0, 0, 0], [2, 2, 0, 0], [2, 2, 2, 0], [3, 3, 3, 1]],
+      say: "对比：如果没有 KV Cache，decode 第 2 步要把“我”“爱”“北”的 K、V 全部重新算一遍。整个生成过程里，有 Cache 时 K、V 一共算 4 次（每个 token 1 次）；没有 Cache 时要算 2 + 3 + 4 = 9 次，生成越长，重复算得越多。",
+      code: "out = model(input_ids=[我, 爱, 北, 京])   # 不用 Cache：每一步都从头算" }
+  ];
+
+  function $(id) { return document.getElementById("k-" + id); }
+  function row(label, classes, texts) {
+    var h = "<tr><td class=\"label\">" + label + "</td>";
+    for (var i = 0; i < 4; i++) h += "<td class=\"kc " + (classes ? classes[i] : "") + "\">" + (texts ? texts[i] : "") + "</td>";
+    return h + "</tr>";
+  }
+  var cur = 0;
+  function show(i) {
+    cur = Math.max(0, Math.min(STEPS.length - 1, i));
+    var s = STEPS[cur], tokText = s.tokText || TOK;
+    $("leftsub").textContent = s.sub;
+    function lab(p, cls) {
+      return tokText.map(function (t, j) { return cls[j] === "empty" ? "" : (cls[j] === "unused" ? "不再用" : p + " " + t); });
+    }
+    var h = "<tr><th class=\"label\"></th><th>位置 1</th><th>位置 2</th><th>位置 3</th><th>位置 4</th></tr>";
+    h += "<tr><td class=\"label\">token</td>" + tokText.map(function (t, j) { return "<td class=\"kc tok " + (s.tok[j] || "") + "\">" + t + "</td>"; }).join("") + "</tr>";
+    h += row("Q", s.q, lab("Q", s.q));
+    h += row("K", s.k, lab("K", s.k));
+    h += row("V", s.v, lab("V", s.v));
+    if (s.cache) h += row("KV Cache", s.cache, s.cacheText);
+    h += row("预测", s.out, s.outText || NEXT.map(function (t, j) { return s.out[j] === "empty" ? "" : t; }));
+    $("qkv").innerHTML = h;
+
+    var a = "<tr><th class=\"label\"></th>" + TOK.map(function (t) { return "<th>" + t + "</th>"; }).join("") + "</tr>";
+    for (var r = 0; r < 4; r++) {
+      a += "<tr><td class=\"label\">" + TOK[r] + " 的 Q</td>";
+      for (var c = 0; c < 4; c++) {
+        var k = "empty", t = "";
+        if (s.att === "none") { k = "empty"; }
+        else if (c > r) { k = "masked"; t = "×"; }
+        else if (s.att === "allhi") { k = "hi"; t = "看"; }
+        else if (s.att === "all") { k = ""; t = "看"; }
+        else if (s.att[r]) {
+          var v = s.att[r][c];
+          if (v === 1 || v === 3) { k = "hi"; t = "看"; }
+          else if (v === 2) { k = "dim"; t = "看"; }
+        }
+        a += "<td class=\"kc " + k + "\">" + t + "</td>";
+      }
+      a += "</tr>";
+    }
+    $("att").innerHTML = a;
+
+    $("say").textContent = s.say;
+    $("code").textContent = s.code;
+    $("count").textContent = (cur + 1) + " / " + STEPS.length;
+    $("prev").disabled = cur === 0;
+    $("next").disabled = cur === STEPS.length - 1;
+    var d = $("dots").children;
+    for (var m = 0; m < d.length; m++) { d[m].classList.toggle("now", m === cur); d[m].classList.toggle("done", m < cur); }
+    if (window.__setHash) window.__setHash("kvcache", cur + 1);
+  }
+  STEPS.forEach(function (_, i) {
+    var b = document.createElement("button");
+    b.setAttribute("aria-label", "第 " + (i + 1) + " 步");
+    b.addEventListener("click", function () { show(i); });
+    $("dots").appendChild(b);
+  });
+  $("prev").addEventListener("click", function () { show(cur - 1); });
+  $("next").addEventListener("click", function () { show(cur + 1); });
+  document.addEventListener("keydown", function (e) {
+    if ($("view").hidden) return;
+    if (e.key === "ArrowRight") show(cur + 1);
+    if (e.key === "ArrowLeft") show(cur - 1);
+  });
+  show(0);
+  window.__v = window.__v || {};
+  window.__v.kvcache = { show: show, cur: function () { return cur; } };
+})();
+</script>
+<script>
+(function () {
+  var KEYS = ["overview", "attention", "encoder", "decoder", "deconly", "kvcache"], active = "overview";
+  var TITLE = { overview: "Transformer 整体：编码器和解码器", attention: "Transformer 注意力怎么算", encoder: "Transformer 编码器一层逐步讲解", decoder: "Transformer 解码器一层逐步讲解", deconly: "单纯解码器模型和编码器 + 解码器模型的区别", kvcache: "Transformer KV Cache：训练和推理" };
   window.__setHash = function (key, n) {
     if (key !== active) return;
     try { history.replaceState(null, "", "#" + key + "-" + n); } catch (e) {}
@@ -1150,7 +1314,7 @@ function stackGrids(A, root, items, x, y) {
   function activate(key, step) {
     active = key;
     KEYS.forEach(function (k) {
-      document.getElementById({ overview: "o", attention: "a", encoder: "e", decoder: "d", deconly: "g" }[k] + "-view").hidden = (k !== key);
+      document.getElementById({ overview: "o", attention: "a", encoder: "e", decoder: "d", deconly: "g", kvcache: "k" }[k] + "-view").hidden = (k !== key);
       document.getElementById("tab-" + k).setAttribute("aria-selected", k === key ? "true" : "false");
     });
     document.title = TITLE[key];
@@ -1161,7 +1325,7 @@ function stackGrids(A, root, items, x, y) {
     document.getElementById("tab-" + k).addEventListener("click", function () { activate(k); window.scrollTo(0, 0); });
   });
   function fromHash() {
-    var m = /^#(overview|attention|encoder|decoder|deconly)(?:-(\d+))?$/.exec(location.hash);
+    var m = /^#(overview|attention|encoder|decoder|deconly|kvcache)(?:-(\d+))?$/.exec(location.hash);
     if (m) activate(m[1], m[2] ? parseInt(m[2], 10) : undefined);
     else activate(active);
   }
