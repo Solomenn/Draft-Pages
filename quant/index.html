@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QLoRA：NF4 量化、双重量化和分页优化器</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<script>
+  window.MathJax = { tex: { inlineMath: [["\\(", "\\)"]] }, svg: { fontCache: "global" }, startup: { typeset: false } };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js" async></script>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --ink: #16202b; --muted: #5d6b7a; --line: #c9d1da;
+    --accent: #0b6e8a; --warm: #a8650c; --proc: #e3f1f5; --good: #2f8a4f; --bad: #b42318; --purple: #7b4fb3;
+    --font-body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    --font-code: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f151b; --panel: #161e26; --ink: #e6edf3; --muted: #93a1b0; --line: #2c3844;
+      --accent: #4cc0df; --warm: #f0b44c; --proc: #16303a; --good: #62d48a; --bad: #ff7b72; --purple: #b99bf0; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--font-body); }
+  .wrap { padding: 24px 16px 40px; }
+  .view { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font-size: 20px; font-weight: 700; margin: 0; text-wrap: balance; }
+  .gist { margin: -6px 0 0; font-size: 16px; line-height: 1.7; max-width: 48em; }
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  svg.diagram { display: block; width: 100%; height: auto; font-family: var(--font-body); }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  #draw > * { animation: fadein .45s; }
+
+  .t { fill: var(--ink); font-size: 13px; }
+  .tb { fill: var(--ink); font-size: 13.5px; font-weight: 700; }
+  .tm { fill: var(--muted); font-size: 12.5px; }
+  .tc { fill: var(--ink); font-family: var(--font-code); font-size: 12px; }
+  .tcm { fill: var(--muted); font-family: var(--font-code); font-size: 11px; }
+  .tw { fill: var(--warm); font-size: 12.5px; font-weight: 600; }
+  .axis { stroke: var(--muted); stroke-width: 1.2; }
+  .tick { stroke: var(--ink); stroke-width: 1.6; }
+  .tick.acc { stroke: var(--accent); stroke-width: 2; }
+  .tick.hi { stroke: var(--warm); stroke-width: 3; }
+  .bar { fill: color-mix(in srgb, var(--accent) 30%, var(--panel)); stroke: var(--accent); stroke-width: .6; }
+  .bar.u { fill: color-mix(in srgb, var(--muted) 25%, var(--panel)); stroke: var(--muted); }
+  .bar.warm { fill: color-mix(in srgb, var(--warm) 35%, var(--panel)); stroke: var(--warm); }
+  .curve { fill: none; stroke: var(--warm); stroke-width: 2.2; }
+  .area { fill: color-mix(in srgb, var(--warm) 10%, transparent); stroke: none; }
+  .slice0 { fill: color-mix(in srgb, var(--accent) 28%, var(--panel)); }
+  .slice1 { fill: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+  .pt { fill: var(--warm); stroke: var(--panel); stroke-width: 2; }
+  .cell rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; }
+  .cell text { font-family: var(--font-code); font-size: 12px; fill: var(--ink); }
+  .cell.hi rect { fill: color-mix(in srgb, var(--warm) 22%, var(--panel)); stroke: var(--warm); }
+  .cell.out rect { fill: color-mix(in srgb, var(--bad) 14%, var(--panel)); stroke: var(--bad); }
+  .cell.zero rect { fill: color-mix(in srgb, var(--muted) 18%, var(--panel)); }
+  .cell.ok rect { fill: color-mix(in srgb, var(--accent) 14%, var(--panel)); stroke: var(--accent); }
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  .box.proc { fill: var(--proc); }
+  .box.hot { stroke: var(--accent); stroke-width: 2.5; }
+  .box.frozen { stroke-dasharray: 6 4; stroke: var(--muted); }
+  .link { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .sep { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 5 4; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; color: var(--muted); font-size: 13.5px; margin-top: -6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line); display: inline-block; }
+  .sw.hi { background: color-mix(in srgb, var(--warm) 22%, var(--panel)); border-color: var(--warm); }
+  .sw.out { background: color-mix(in srgb, var(--bad) 14%, var(--panel)); border-color: var(--bad); }
+  .sw.zero { background: color-mix(in srgb, var(--muted) 18%, var(--panel)); }
+
+  .caption { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-height: 140px; display: flex; flex-direction: column; gap: 12px; }
+  .caption .say { margin: 0; font-size: 18px; line-height: 1.75; font-weight: 500; max-width: 44em; text-wrap: pretty; }
+  .caption .code { margin: 0; font-family: var(--font-code); font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
+  .nav { display: flex; align-items: center; gap: 14px; }
+  .nav button.arrow-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; display: grid; place-items: center; flex: none; }
+  .nav button.arrow-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .nav button.arrow-btn:disabled { opacity: .35; cursor: default; }
+  button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .dots { display: flex; flex-wrap: wrap; gap: 8px; flex: 1; justify-content: center; }
+  .dots button { width: 14px; height: 14px; padding: 0; border-radius: 50%; border: 1.5px solid var(--line); background: var(--panel); cursor: pointer; }
+  .dots button.done { background: var(--line); }
+  .dots button.now { background: var(--accent); border-color: var(--accent); transform: scale(1.25); }
+  .count { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; min-width: 3.5em; text-align: right; flex: none; }
+  @media (min-width: 700px) {
+    .nav button.arrow-btn { position: fixed; top: 50%; transform: translateY(-50%); width: 52px; height: 52px; z-index: 5; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+    .nav .prev { left: 8px; }
+    .nav .next { right: 8px; }
+    .view { padding-inline: 64px; }
+  }
+  @media (min-width: 1200px) {
+    .view { padding-inline: 0; }
+    .nav .prev { left: calc(50% - 592px); }
+    .nav .next { right: calc(50% - 592px); }
+  }
+  @media (prefers-reduced-motion: reduce) { #draw > * { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="view">
+  <h1>QLoRA：NF4 量化、双重量化和分页优化器</h1>
+  <p class="gist">本质上是，先把每一块权重缩放到 −1 到 1，再在一把中间密、两头疏的 16 格刻度尺上找最近的刻度，只记下这个刻度的编号（0–15，正好 4 bit）；用的时候按编号查刻度表，再乘回这一块的缩放值。</p>
+  <div class="legend" id="legend"></div>
+  <div class="stage">
+    <svg class="diagram" id="diagram" viewBox="0 0 1000 520" role="img" aria-label="NF4 量化逐步演示">
+      <defs><marker id="head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker></defs>
+      <g id="draw"></g>
+    </svg>
+  </div>
+  <div class="caption" aria-live="polite">
+    <p class="say" id="say"></p>
+    <p class="code" id="code"></p>
+  </div>
+  <div class="nav">
+    <button class="arrow-btn prev" id="prev" aria-label="上一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"></path></svg></button>
+    <div class="dots" id="dots"></div>
+    <span class="count" id="count"></span>
+    <button class="arrow-btn next" id="next" aria-label="下一步"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4 6 6-6 6"></path></svg></button>
+  </div>
+</div>
+</div>
+<script>
+/* ===== 数据和计算 ===== */
+
+/* NF4 刻度表：bitsandbytes 里的 16 个值，索引号 0–15 */
+var NF4 = [-1.0, -0.6961928009986877, -0.5250730514526367, -0.39491748809814453, -0.28444138169288635, -0.18477343022823334, -0.09105003625154495, 0.0,
+           0.07958029955625534, 0.16093020141124725, 0.24611230194568634, 0.33791524171829224, 0.44070982933044434, 0.5626170039176941, 0.7229568362236023, 1.0];
+/* 等距刻度表：−1 到 1 等距取 16 个，用来和 NF4 对比 */
+var UNI = []; for (var u = 0; u < 16; u++) UNI.push(-1 + u * 2 / 15);
+var OFFSET = 0.9677083;   /* 最外面的刻度取在这个分位数上 */
+
+/* 标准正态分布的密度 φ(z) 和分位数函数 Φ⁻¹(p)（Acklam 近似） */
+function pdf(z) { return Math.exp(-z * z / 2) / Math.sqrt(2 * Math.PI); }
+function ppf(p) {
+  var a = [-39.69683028665376, 220.9460984245205, -275.9285104469687, 138.357751867269, -30.66479806614716, 2.506628277459239];
+  var b = [-54.47609879822406, 161.5858368580409, -155.6989798598866, 66.80131188771972, -13.28068155288572];
+  var c = [-0.007784894002430293, -0.3223964580411365, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783];
+  var d = [0.007784695709041462, 0.3224671290700398, 2.445134137142996, 3.754408661907416];
+  var q, r;
+  if (p < 0.02425) { q = Math.sqrt(-2 * Math.log(p)); return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+  if (p > 1 - 0.02425) return -ppf(1 - p);
+  q = p - 0.5; r = q * q;
+  return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1);
+}
+var ZMAX = ppf(OFFSET);   /* ≈ 1.848：刻度表里的 1.0 对应 z ≈ 1.848 */
+
+/* 例子的 16 个权重：两块，每块 8 个；第 2 块的 2.40 是异常值 */
+var W = [0.12, -0.35, 0.03, 0.48, -0.07, -0.21, 0.29, -0.55, 0.18, -0.09, 2.40, -0.31, 0.05, 0.37, -0.14, 0.22];
+var OUT = 10;
+
+/* nearest(T, s)：在刻度表 T 里找离 s 最近的刻度，返回它的索引号 */
+function nearest(T, s) { var best = 0; for (var i = 1; i < T.length; i++) if (Math.abs(T[i] - s) < Math.abs(T[best] - s)) best = i; return best; }
+/* quant(x, T, bs)：x 按每 bs 个一块量化；返回每个数的 absmax、缩放后的值、索引号、还原值 */
+function quant(x, T, bs) {
+  var r = { absmax: [], s: [], idx: [], back: [] };
+  for (var i = 0; i < x.length; i += bs) {
+    var blk = x.slice(i, i + bs), m = Math.max.apply(null, blk.map(Math.abs));
+    blk.forEach(function (v) { var s = v / m, k = nearest(T, s); r.absmax.push(m); r.s.push(s); r.idx.push(k); r.back.push(T[k] * m); });
+  }
+  return r;
+}
+function meanErr(x, back, skip) { var s = 0, n = 0; x.forEach(function (v, i) { if (i === skip) return; s += Math.abs(back[i] - v); n++; }); return s / n; }
+
+/* 4096 个标准正态随机数（固定种子，每次打开都一样） */
+function rng(seed) { return function () { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+var R = rng(7), BIG = [];
+while (BIG.length < 4096) { var u1 = R() || 1e-9, u2 = R(); BIG.push(Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2)); }
+var BIG_NF4 = quant(BIG, NF4, 64), BIG_UNI = quant(BIG, UNI, 64);
+
+function fmt(v, n) { n = n === undefined ? 2 : n; var t = Math.abs(v).toFixed(n); return (v < 0 && +t !== 0 ? "−" : "") + t; }
+
+/* ===== 画图的小工具 ===== */
+var SVGNS = "http://www.w3.org/2000/svg", root = document.getElementById("draw");
+function mk(tag, attrs, text) { var el = document.createElementNS(SVGNS, tag); for (var k in attrs) el.setAttribute(k, attrs[k]); if (text !== undefined) el.textContent = text; root.appendChild(el); return el; }
+function txt(x, y, t, cls, anchor) { return mk("text", { x: x, y: y, "class": cls || "t", "text-anchor": anchor || "start" }, t); }
+function ln(x1, y1, x2, y2, cls) { return mk("line", { x1: x1, y1: y1, x2: x2, y2: y2, "class": cls }); }
+function cell(x, y, w, h, t, cls) {
+  var g = document.createElementNS(SVGNS, "g"); g.setAttribute("class", "cell" + (cls ? " " + cls : ""));
+  var r = document.createElementNS(SVGNS, "rect"); r.setAttribute("x", x); r.setAttribute("y", y); r.setAttribute("width", w); r.setAttribute("height", h); g.appendChild(r);
+  var tx = document.createElementNS(SVGNS, "text"); tx.setAttribute("x", x + w / 2); tx.setAttribute("y", y + h / 2 + 4.5); tx.setAttribute("text-anchor", "middle"); tx.textContent = t; g.appendChild(tx);
+  root.appendChild(g); return g;
+}
+/* 刻度尺：y 是尺的位置，T 是刻度表，x0、x1 是 −1 和 1 在图上的位置 */
+function ruler(y, T, title, cls, opt) {
+  opt = opt || {};
+  var x0 = 120, x1 = 920, X = function (v) { return x0 + (v + 1) / 2 * (x1 - x0); };
+  txt(x0 - 10, y - 30, title, "tb");
+  ln(x0, y, x1, y, "axis");
+  T.forEach(function (v, i) {
+    ln(X(v), y - 9, X(v), y + 9, "tick " + (cls || ""));
+    txt(X(v), y - 14, String(i), "tcm", "middle");
+  });
+  if (!opt.noVals) { txt(x0, y + 26, "−1", "tcm", "middle"); txt(X(0), y + 26, "0", "tcm", "middle"); txt(x1, y + 26, "1", "tcm", "middle"); }
+  return X;
+}
+
+/* ===== 每一步画什么 ===== */
+function drawHist() {
+  var bw = 0.2, lo = -4, nb = 40, cnt = new Array(nb).fill(0);
+  BIG.forEach(function (v) { var k = Math.floor((v - lo) / bw); if (k >= 0 && k < nb) cnt[k]++; });
+  var x0 = 100, x1 = 900, yb = 450, H = 360, maxc = Math.max.apply(null, cnt);
+  var X = function (v) { return x0 + (v - lo) / 8 * (x1 - x0); }, Y = function (c) { return yb - c / maxc * H; };
+  txt(x0, 40, "4096 个权重画成直方图（例子用标准正态分布随机生成）", "tb");
+  cnt.forEach(function (c, k) { mk("rect", { x: X(lo + k * bw) + 1, y: Y(c), width: (x1 - x0) / nb - 2, height: yb - Y(c), "class": "bar" }); });
+  var d = ""; for (var z = -4; z <= 4.001; z += 0.05) d += (d ? " L" : "M") + X(z).toFixed(1) + " " + Y(4096 * bw * pdf(z)).toFixed(1);
+  mk("path", { d: d, "class": "curve" });
+  ln(x0, yb, x1, yb, "axis");
+  for (var t = -4; t <= 4; t++) { ln(X(t), yb, X(t), yb + 6, "axis"); txt(X(t), yb + 22, fmt(t, 0), "tcm", "middle"); }
+  var in1 = BIG.filter(function (v) { return Math.abs(v) <= 1; }).length;
+  txt(700, 110, "黄线：正态分布曲线", "tw");
+  txt(700, 134, "|w| ≤ 1 的有 " + in1 + " 个（" + Math.round(in1 / 40.96) + "%）", "tm");
+}
+function drawRulers() {
+  var x0 = 120, x1 = 920, X = function (v) { return x0 + (v + 1) / 2 * (x1 - x0); };
+  /* 上面画一条钟形曲线：缩放到 [−1, 1] 之后权重落在哪里 */
+  var d = "", top = 40, H = 110;
+  for (var v = -1; v <= 1.0001; v += 0.01) d += (d ? " L" : "M") + X(v).toFixed(1) + " " + (top + H - pdf(v * ZMAX) / pdf(0) * H).toFixed(1);
+  mk("path", { d: d + " L" + x1 + " " + (top + H) + " L" + x0 + " " + (top + H) + " Z", "class": "area" });
+  mk("path", { d: d, "class": "curve" });
+  txt(x1 + 8, top + 20, "权重多", "tw"); txt(x1 + 8, top + 38, "在中间", "tw");
+  ruler(230, UNI, "等距刻度：−1 到 1 等距取 16 个", "", {});
+  ruler(340, NF4, "NF4 刻度：按正态分布画，中间密、两头疏", "acc", {});
+  txt(120, 410, "NF4 刻度表（索引号 → 刻度值）", "tb");
+  NF4.forEach(function (v, i) { cell(120 + i * 50, 422, 50, 26, String(i)); cell(120 + i * 50, 448, 50, 26, fmt(v, 3)); });
+}
+function drawBuild() {
+  var x0 = 80, x1 = 920, yb = 330, H = 250, zr = 2.6;
+  var X = function (z) { return x0 + (z + zr) / (2 * zr) * (x1 - x0); }, Y = function (y) { return yb - y / pdf(0) * H; };
+  txt(x0, 40, "标准正态分布，切口就是刻度：正半边 8 条、负半边 7 条，每边的条面积相同", "tb");
+  var zs = NF4.map(function (v) { return v * ZMAX; });
+  for (var i = 0; i < 15; i++) {
+    var a = zs[i], b = zs[i + 1], d = "M" + X(a) + " " + yb;
+    for (var z = a; z <= b + 1e-9; z += 0.01) d += " L" + X(Math.min(z, b)).toFixed(1) + " " + Y(pdf(Math.min(z, b))).toFixed(1);
+    mk("path", { d: d + " L" + X(b) + " " + yb + " Z", "class": i % 2 ? "slice1" : "slice0" });
+  }
+  var c = ""; for (var z2 = -zr; z2 <= zr + 1e-9; z2 += 0.02) c += (c ? " L" : "M") + X(z2).toFixed(1) + " " + Y(pdf(z2)).toFixed(1);
+  mk("path", { d: c, "class": "curve" });
+  ln(x0, yb, x1, yb, "axis");
+  zs.forEach(function (z, i) { ln(X(z), yb, X(z), yb + 10, "tick acc"); txt(X(z), yb + 24, String(i), "tcm", "middle"); });
+  txt(X(0), yb + 44, "z = 0", "tcm", "middle");
+  txt(X(ZMAX), yb + 44, "z ≈ " + ZMAX.toFixed(3), "tcm", "middle");
+  txt(X(-ZMAX), yb + 44, "z ≈ −" + ZMAX.toFixed(3), "tcm", "middle");
+  txt(x0, 420, "正半边：从 50% 分位数（z = 0）到 " + (OFFSET * 100).toFixed(2) + "% 分位数，等分成 8 段，每段面积 " + ((OFFSET - 0.5) / 8 * 100).toFixed(2) + "%", "tm");
+  txt(x0, 444, "负半边：同样的范围等分成 7 段，每段面积 " + ((OFFSET - 0.5) / 7 * 100).toFixed(2) + "%；加上 0 一共 16 个刻度", "tm");
+  txt(x0, 468, "最后每个刻度除以 " + ZMAX.toFixed(3) + "，最外面的刻度变成 ±1，就是上一步的 NF4 刻度表", "tm");
+}
+var LBL = ["原来的权重", "除以 absmax", "最近的 NF4 刻度", "索引号", "还原值", "误差"];
+function drawTable(bs) {
+  var q = quant(W, NF4, bs), x0 = 160, cw = 52, y0 = 70, rh = 34;
+  if (bs === 16) txt(x0, 40, "16 个权重共用一个 absmax = " + fmt(q.absmax[0]), "tb");
+  else { txt(x0, 40, "第 1 块：absmax = " + fmt(q.absmax[0]), "tb"); txt(x0 + 8 * cw, 40, "第 2 块：absmax = " + fmt(q.absmax[8]), "tb"); }
+  LBL.forEach(function (l, r) { txt(x0 - 12, y0 + r * rh + 21, l, "t", "end"); });
+  W.forEach(function (w, i) {
+    var x = x0 + i * cw, idx = q.idx[i], crushed = idx >= 6 && idx <= 8 && i !== OUT;
+    var rows = [fmt(w), fmt(q.s[i]), fmt(NF4[idx]), String(idx), fmt(q.back[i]), fmt(Math.abs(q.back[i] - w))];
+    rows.forEach(function (t, r) {
+      var cls = i === OUT ? "out" : (r === 3 && crushed ? "zero" : "");
+      cell(x, y0 + r * rh, cw, rh, t, cls);
+    });
+  });
+  if (bs === 8) ln(x0 + 8 * cw, y0 - 14, x0 + 8 * cw, y0 + 6 * rh + 10, "sep");
+  var crushedN = q.idx.filter(function (k, i) { return k >= 6 && k <= 8 && i !== OUT; }).length;
+  var e = meanErr(W, q.back, OUT);
+  txt(x0, y0 + 6 * rh + 42, "红色：异常值 2.40。灰色：索引号落在 6、7、8（0 附近的三个刻度）的数，共 " + crushedN + " 个", "tm");
+  txt(x0, y0 + 6 * rh + 68, "除异常值以外 15 个数的平均误差：" + fmt(e, 3), "tw");
+  return e;
+}
+function drawOne() {
+  var q = quant(W, NF4, 8), i = 6, s = q.s[i], k = q.idx[i];
+  var lo = 0.25, hi = 0.8, x0 = 120, x1 = 920, X = function (v) { return x0 + (v - lo) / (hi - lo) * (x1 - x0); }, y = 170;
+  txt(x0, 40, "第 1 块里的 0.29：放大看刻度尺 0.25 到 0.80 这一段", "tb");
+  ln(x0, y, x1, y, "axis");
+  NF4.forEach(function (v, j) {
+    if (v < lo || v > hi) return;
+    ln(X(v), y - 14, X(v), y + 14, "tick " + (j === k ? "hi" : "acc"));
+    txt(X(v), y - 22, "索引 " + j, "tcm", "middle");
+    txt(X(v), y + 32, fmt(v, 3), "tcm", "middle");
+  });
+  mk("circle", { cx: X(s), cy: y, r: 7, "class": "pt" });
+  txt(X(s), y + 58, "0.29 ÷ 0.55 ≈ " + fmt(s, 3), "tw", "middle");
+  var below = NF4[k - 1], above = NF4[k];
+  var lines = [
+    "① 缩放：0.29 ÷ absmax 0.55 ≈ " + fmt(s, 3),
+    "② 找最近的刻度：离 " + fmt(above, 3) + "（索引 " + k + "）差 " + fmt(Math.abs(above - s), 3) + "，离 " + fmt(below, 3) + "（索引 " + (k - 1) + "）差 " + fmt(Math.abs(below - s), 3) + " → 取索引 " + k,
+    "③ 只存索引号：" + k + " 写成 4 bit 是 " + k.toString(2).padStart(4, "0"),
+    "④ 还原：查表得 " + fmt(NF4[k], 3) + "，乘回 0.55 ≈ " + fmt(q.back[i], 3) + "，误差 " + fmt(Math.abs(q.back[i] - 0.29), 3)
+  ];
+  lines.forEach(function (t, j) { txt(x0, 300 + j * 34, t, "t"); });
+}
+function drawStore() {
+  var q = quant(W, NF4, 8), x0 = 160, cw = 70;
+  txt(40, 40, "第 1 块在内存里存什么（例子每块 8 个；QLoRA 每块 64 个）", "tb");
+  txt(x0 - 12, 86, "索引号", "t", "end");
+  txt(x0 - 12, 126, "4 bit", "t", "end");
+  for (var i = 0; i < 8; i++) { cell(x0 + i * cw, 66, cw, 30, String(q.idx[i])); cell(x0 + i * cw, 106, cw, 30, q.idx[i].toString(2).padStart(4, "0")); }
+  txt(x0 - 12, 176, "两个一字节", "t", "end");
+  for (var b = 0; b < 4; b++) {
+    var byte = (q.idx[2 * b] << 4) | q.idx[2 * b + 1];
+    cell(x0 + b * 2 * cw, 156, 2 * cw, 30, "0x" + byte.toString(16).toUpperCase().padStart(2, "0"), "ok");
+  }
+  txt(x0 - 12, 226, "absmax", "t", "end");
+  cell(x0, 206, 2 * cw, 30, "0.55（32 bit）", "hi");
+  /* 每个权重平均占多少 bit */
+  var yb = 300, bars = [["bf16 原样存", 16, "u"], ["NF4，每 64 个一块，absmax 用 32 bit", 4 + 32 / 64, ""], ["NF4 + 双重量化（absmax 再压成 8 bit）", 4 + 8 / 64 + 32 / (64 * 256), "warm"]];
+  txt(40, yb, "每个权重平均占多少 bit", "tb");
+  bars.forEach(function (bb, j) {
+    var y = yb + 20 + j * 52;
+    txt(40, y + 22, bb[0], "t");
+    mk("rect", { x: 400, y: y + 4, width: bb[1] / 16 * 480, height: 28, "class": "bar " + bb[2] });
+    txt(408 + bb[1] / 16 * 480, y + 24, fmt(bb[1], 3) + " bit", "tc");
+  });
+}
+function drawDouble() {
+  /* 4096 个权重每 64 个一块，得到 64 个 absmax；双重量化把它们压成 8 bit */
+  var A = []; for (var i = 0; i < BIG_NF4.absmax.length; i += 64) A.push(BIG_NF4.absmax[i]);
+  var mean = A.reduce(function (a, b) { return a + b; }, 0) / A.length;
+  var C = A.map(function (a) { return a - mean; }), s2 = Math.max.apply(null, C.map(Math.abs));
+  var code = C.map(function (c) { return Math.round(c / s2 * 127); }), back = code.map(function (k) { return k / 127 * s2 + mean; });
+  var x0 = 210, cw = 92, y0 = 70, rh = 34, n = 8;
+  txt(40, 40, "4096 个权重每 64 个一块，得到 " + A.length + " 个 absmax；下面是前 8 个", "tb");
+  var lbl = ["absmax（32 bit）", "减去平均数 " + fmt(mean, 3), "÷ 第二级 absmax " + fmt(s2, 3), "8 bit 编码", "还原值", "误差"];
+  lbl.forEach(function (l, r) { txt(x0 - 12, y0 + r * rh + 21, l, "t", "end"); });
+  for (var j = 0; j < n; j++) {
+    [fmt(A[j], 4), fmt(C[j], 4), fmt(C[j] / s2, 3), String(code[j]), fmt(back[j], 4), fmt(Math.abs(back[j] - A[j]), 4)].forEach(function (t, r) {
+      cell(x0 + j * cw, y0 + r * rh, cw, rh, t, r === 3 ? "ok" : "");
+    });
+  }
+  var lines = [
+    "第一级：每 64 个权重一个 absmax，用 32 bit 存 → 平均每个权重 32 / 64 = 0.5 bit",
+    "双重量化：每个 absmax 改用 8 bit 存 → 8 / 64 = 0.125 bit；每 256 个 absmax 再存一个 32 bit 的第二级缩放值 → 32 / (64 × 256) ≈ 0.002 bit",
+    "合计约 0.127 bit，每个权重省下约 0.373 bit；65B 模型约省 3 GB"
+  ];
+  lines.forEach(function (t, j) { txt(40, 330 + j * 30, t, j === 2 ? "tw" : "tm"); });
+  txt(40, 440, "例子只有 " + A.length + " 个 absmax，所以只有一块；为了看得清楚，例子用 −127 到 127 的等距 8 bit 编码，论文用的是 8 bit 浮点数", "tm");
+}
+function drawPaged() {
+  function seg(x, y, w, h, t, cls) { mk("rect", { x: x, y: y, width: w, height: h, rx: 4, "class": "box " + (cls || "") }); txt(x + w / 2, y + h / 2 + 5, t, "t", "middle"); }
+  function arrow(d) { mk("path", { d: d, "class": "link", "marker-end": "url(#head)" }); }
+  var x0 = 160, cap = 620, h = 46;
+  txt(40, 40, "显存里放了什么（示意，长度不按比例）", "tb");
+  /* 平时 */
+  txt(x0 - 12, 104, "平时", "t", "end");
+  mk("rect", { x: x0, y: 78, width: cap, height: h, rx: 6, "class": "box frozen" });
+  seg(x0, 78, 190, h, "W（NF4）", "frozen"); seg(x0 + 190, 78, 80, h, "A、B", "hot"); seg(x0 + 270, 78, 150, h, "优化器状态", "proc"); seg(x0 + 420, 78, 140, h, "激活值", "");
+  txt(x0 + cap + 10, 98, "显存上限", "tm"); ln(x0 + cap, 70, x0 + cap, 132, "sep");
+  /* 遇到很长的序列 */
+  txt(x0 - 12, 214, "长序列", "t", "end");
+  mk("rect", { x: x0, y: 188, width: cap, height: h, rx: 6, "class": "box frozen" });
+  seg(x0, 188, 190, h, "W（NF4）", "frozen"); seg(x0 + 190, 188, 80, h, "A、B", "hot"); seg(x0 + 270, 188, 350, h, "激活值变多", "");
+  ln(x0 + cap, 180, x0 + cap, 242, "sep");
+  /* CPU 内存 */
+  mk("rect", { x: x0 + 250, y: 330, width: 420, height: 90, rx: 10, "class": "box" });
+  txt(x0 + 264, 354, "CPU 内存", "tb");
+  seg(x0 + 270, 366, 150, h, "优化器状态", "proc");
+  arrow("M" + (x0 + 330) + " 238 V362"); txt(x0 + 340, 300, "显存不够时，按页自动挪到 CPU 内存", "tw");
+  arrow("M" + (x0 + 410) + " 362 V242");
+  txt(x0 + 440, 396, "optimizer.step() 要用时再挪回显存", "tm");
+}
+function drawCompare() {
+  var cntN = new Array(16).fill(0), cntU = new Array(16).fill(0);
+  BIG_NF4.idx.forEach(function (k) { cntN[k]++; }); BIG_UNI.idx.forEach(function (k) { cntU[k]++; });
+  var maxc = Math.max.apply(null, cntN.concat(cntU));
+  function panel(x0, cnt, title, cls) {
+    var yb = 300, H = 210, bw = 26;
+    txt(x0, 40, title, "tb");
+    cnt.forEach(function (c, k) { mk("rect", { x: x0 + k * bw + 2, y: yb - c / maxc * H, width: bw - 4, height: c / maxc * H, "class": "bar " + cls }); txt(x0 + k * bw + bw / 2, yb + 16, String(k), "tcm", "middle"); });
+    ln(x0, yb, x0 + 16 * bw, yb, "axis");
+    txt(x0, yb + 38, "横轴：索引号；柱高：用到这个索引号的权重个数", "tm");
+  }
+  panel(40, cntU, "等距刻度：每个索引号用了多少次", "u");
+  panel(540, cntN, "NF4 刻度：每个索引号用了多少次", "");
+  var eU = meanErr(BIG, BIG_UNI.back, -1), eN = meanErr(BIG, BIG_NF4.back, -1);
+  txt(40, 400, "同样 4096 个正态分布的权重、同样每 64 个一块：", "t");
+  txt(40, 430, "等距刻度平均误差 " + fmt(eU, 4) + "；NF4 平均误差 " + fmt(eN, 4) + "，小 " + Math.round((1 - eN / eU) * 100) + "%", "tw");
+}
+function drawQLoRA() {
+  function box(x, y, w, h, t1, t2, cls) { mk("rect", { x: x, y: y, width: w, height: h, rx: 10, "class": "box " + (cls || "") }); txt(x + 14, y + 24, t1, "tb"); if (t2) txt(x + 14, y + 46, t2, "tm"); }
+  function arrow(d) { mk("path", { d: d, "class": "link", "marker-end": "url(#head)" }); }
+  box(30, 200, 120, 60, "输入 x", "bf16");
+  box(220, 60, 300, 64, "W：NF4 索引号 + 每块 absmax", "冻结，不更新", "frozen");
+  box(220, 160, 300, 64, "反量化：查刻度表 × absmax", "临时得到 bf16 的 W，用完就扔", "proc");
+  box(600, 160, 140, 64, "x · W", "主干的输出");
+  box(220, 300, 300, 64, "LoRA：A（d × r）和 B（r × d）", "bf16，训练时只更新它们", "hot");
+  box(600, 300, 140, 64, "x · A · B", "LoRA 的输出");
+  box(800, 220, 160, 64, "相加 → 输出 y", "");
+  arrow("M370 126 V156"); arrow("M522 192 H596"); arrow("M150 222 H180 V192 H216"); arrow("M150 238 H180 V332 H216"); arrow("M522 332 H596");
+  arrow("M742 192 H770 V240 H796"); arrow("M742 332 H770 V264 H796");
+  txt(30, 430, "梯度从输出 y 往回传：穿过反量化出来的 W 传到 x，但只有 A、B 用梯度更新，W 一直是 NF4 的索引号", "tm");
+}
+
+/* ===== 每一步的说明 ===== */
+var e16 = meanErr(W, quant(W, NF4, 16).back, OUT), e8 = meanErr(W, quant(W, NF4, 8).back, OUT);
+var STEPS = [
+  { draw: drawHist,
+    say: "第一个观察：一层的权重画成直方图，大多数是这个形状，中间多、两头少，接近正态分布。所以如果要用 16 个刻度去近似这些数，刻度应该多放在中间，而不是等距摆开。",
+    code: "w = layer.weight.flatten()   # 例子：4096 个数\nplt.hist(w, bins=40)" },
+  { draw: drawRulers,
+    say: "4 bit 能编 16 个号（0–15），所以两把尺都只有 16 个刻度，范围都是 −1 到 1。上面那把等距；下面的 NF4 中间密、两头疏。权重缩放到 −1 到 1 以后大多挤在中间（黄色曲线），NF4 在这里刻度多，每个权重离最近的刻度就更近。",
+    code: "NF4 = [-1.0, -0.696, -0.525, -0.395, -0.284, -0.185, -0.091, 0.0,\n       0.080, 0.161, 0.246, 0.338, 0.441, 0.563, 0.723, 1.0]   # 索引号 0–15" },
+  { draw: drawBuild,
+    say: "刻度按标准正态分布的分位数来画：正半边从 \\(z=0\\) 到 \\(z=\\Phi^{-1}(0.9677)\\approx 1.848\\) 之间切成 8 条面积相同的条，负半边切成 7 条，切口 \\(q_i=\\Phi^{-1}(p_i)\\) 就是刻度，再加上 0，一共 16 个。最外面取 96.77% 分位数，是因为 \\(\\Phi^{-1}(1)\\) 是无穷远。最后每个刻度除以 1.848，得到 \\(\\tilde q_i=q_i/\\Phi^{-1}(0.9677)\\in[-1,1]\\)。正负两边不对称，是为了让 0 正好是一个刻度。",
+    code: "from scipy.stats import norm\npos = norm.ppf(np.linspace(0.9677, 0.5, 9)[:-1])    # 8 个正刻度\nneg = -norm.ppf(np.linspace(0.9677, 0.5, 8)[:-1])   # 7 个负刻度\nv = np.sort(np.concatenate([pos, [0], neg]))\nNF4 = v / v.max()   # 缩放到 [-1, 1]" },
+  { draw: function () { drawTable(16); },
+    say: "量化先要把权重缩放到 −1 到 1：每个数除以 absmax（这组数里绝对值最大的那个）。如果 16 个数共用一个 absmax，异常值 2.40 会把其他数都压到 0 附近：大部分数的索引号挤在 6、7、8，0 附近的三个刻度上，还原回来误差很大。除异常值以外的平均误差是 " + fmt(e16, 3) + "。",
+    code: "s = w / w.abs().max()   # 整组一个 absmax = 2.40\nidx = (s[:, None] - NF4).abs().argmin(dim=1)   # 最近刻度的索引号" },
+  { draw: function () { drawTable(8); },
+    say: "分块处理：每 8 个数一块（QLoRA 是每 64 个一块），每块用自己的 absmax。异常值 2.40 只影响第 2 块；第 1 块的 absmax 是 0.55，它的 8 个数被拉开到整把刻度尺上，用上了不同的刻度。平均误差从 " + fmt(e16, 3) + " 降到 " + fmt(e8, 3) + "。",
+    code: "blocks = w.view(-1, 8)   # QLoRA 里是 view(-1, 64)\nabsmax = blocks.abs().max(dim=1, keepdim=True)   # 每块一个\nidx = ((blocks / absmax)[..., None] - NF4).abs().argmin(dim=-1)" },
+  { draw: drawOne,
+    say: "跟着第 1 块里的 0.29 走一遍：先除以这一块的 absmax，\\(0.29/0.55\\approx0.527\\)；在刻度表里离它最近的是 0.563，索引号 13；只存 13，也就是 4 bit 的 1101。用的时候查表得 0.563，再乘回 absmax：\\(0.563\\times0.55\\approx0.309\\)。",
+    code: "s = 0.29 / 0.55          # 0.527\nidx = argmin(|s - NF4|)   # 13 → 0b1101\nw_back = NF4[idx] * 0.55   # 0.309" },
+  { draw: drawStore,
+    say: "内存里只存两样东西：每个权重的索引号（4 bit，两个拼成一个字节），以及每块一个 absmax。QLoRA 每 64 个一块，absmax 用 32 bit 存，平均每个权重 \\(4+32/64=4.5\\) bit。QLoRA 再做一次双重量化：把这些 absmax 也每 256 个一块压成 8 bit，平均降到 \\(4+8/64+32/(64\\cdot256)\\approx4.127\\) bit。一个 7B 模型用 bf16 存约 14 GB，用 NF4 约 3.6 GB。",
+    code: "packed = (idx[0::2] << 4) | idx[1::2]   # 两个索引号拼成一个字节\n# 存：packed（uint8）+ absmax（每 64 个权重一个）" },
+  { draw: drawDouble,
+    say: "双重量化：每块的 absmax 本身也要存。每 64 个权重一个 32 bit 的 absmax，平均每个权重多占 0.5 bit。QLoRA 把这些 absmax 也量化一次：absmax 全是正数，先减去它们的平均数让它们分布在 0 两边，再每 256 个一块，除以这一块的第二级 absmax，压成 8 bit。平均每个权重的额外开销从 \\(32/64=0.5\\) bit 降到 \\(8/64+32/(64\\cdot256)\\approx0.127\\) bit，省下约 0.373 bit。",
+    code: "c = absmax - absmax.mean()          # 先减去平均数\nblocks = c.view(-1, 256)            # 每 256 个 absmax 一块\ns2 = blocks.abs().max(dim=1)        # 第二级缩放值，32 bit\ncode = quantize_8bit(blocks / s2)   # 每个 absmax 只存 8 bit" },
+  { draw: drawCompare,
+    say: "为什么按正态分布画刻度更好：同样 4096 个正态分布的权重，等距刻度两头的刻度几乎没人用，中间的刻度又挤；NF4 的 16 个刻度用得均匀得多，两头的刻度也分到了权重。NF4 的柱子还没有完全一样高，是因为每块的 absmax 是 64 个数里最大的那个，通常比 1.848 个标准差大，缩放后的数会偏向中间。同样 4 bit，NF4 的平均误差更小。",
+    code: "err_uni = (dequant(quant(w, UNI)) - w).abs().mean()\nerr_nf4 = (dequant(quant(w, NF4)) - w).abs().mean()" },
+  { draw: drawQLoRA,
+    say: "QLoRA 训练时，大模型的权重 W 一直以 NF4 存着、不更新。每次前向计算时把 W 临时反量化成 bf16 来算 \\(x\\cdot W\\)，用完就扔；旁边加一对小矩阵 A、B（LoRA），只有它们用梯度更新；梯度会穿过还原出来的 W 继续往前传，但 W 本身不更新。输出是 \\(y = xW + xAB\\cdot\\frac{\\alpha}{r}\\)。",
+    code: "W = NF4[idx] * absmax   # 反量化成 bf16，只在这次计算里用\ny = x @ W + (x @ A) @ B * (alpha / r)   # 只有 A、B 用梯度更新" },
+  { draw: drawPaged,
+    say: "分页优化器：Adam 要给每个可训练参数存两份状态（m 和 v），QLoRA 里就是 A、B 的状态。训练中遇到很长的序列时，激活值突然变多，显存可能不够。分页优化器把优化器状态放在 NVIDIA 的统一内存里：显存不够时，按页自动挪到 CPU 内存；optimizer.step() 要更新 A、B 时，再自动挪回显存。这样训练不会因为显存溢出中断，代价是挪来挪去的那几步会慢一些。",
+    code: "import bitsandbytes as bnb\noptimizer = bnb.optim.PagedAdamW32bit(lora_params, lr=2e-4)\n# 用 transformers 时：TrainingArguments(optim=\"paged_adamw_32bit\")" }
+];
+
+/* ===== 翻页 ===== */
+var cur = 0;
+function show(i) {
+  cur = Math.max(0, Math.min(STEPS.length - 1, i));
+  var s = STEPS[cur];
+  root.textContent = "";
+  s.draw();
+  var say = document.getElementById("say");
+  say.textContent = s.say;
+  document.getElementById("code").textContent = s.code;
+  document.getElementById("count").textContent = (cur + 1) + " / " + STEPS.length;
+  document.getElementById("prev").disabled = cur === 0;
+  document.getElementById("next").disabled = cur === STEPS.length - 1;
+  var dots = document.getElementById("dots").children;
+  for (var k = 0; k < dots.length; k++) { dots[k].classList.toggle("now", k === cur); dots[k].classList.toggle("done", k < cur); }
+  if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([say]).catch(function () {});
+}
+STEPS.forEach(function (_, i) { var b = document.createElement("button"); b.setAttribute("aria-label", "第 " + (i + 1) + " 步"); b.addEventListener("click", function () { show(i); }); document.getElementById("dots").appendChild(b); });
+document.getElementById("prev").addEventListener("click", function () { show(cur - 1); });
+document.getElementById("next").addEventListener("click", function () { show(cur + 1); });
+document.addEventListener("keydown", function (e) { if (e.key === "ArrowRight") show(cur + 1); if (e.key === "ArrowLeft") show(cur - 1); });
+[["sw hi", "跟着看的数"], ["sw out", "异常值"], ["sw zero", "索引号挤在 0 附近"]].forEach(function (it) {
+  var s = document.createElement("span"), sw = document.createElement("i"); sw.className = it[0]; s.appendChild(sw); s.appendChild(document.createTextNode(it[1])); document.getElementById("legend").appendChild(s);
+});
+show(0);
+/* MathJax 异步加载完后，把当前这一步的公式也排一遍 */
+(function waitMJ(n) { if (window.MathJax && MathJax.typesetPromise) { MathJax.typesetPromise([document.getElementById("say")]).catch(function () {}); } else if (n < 50) setTimeout(function () { waitMJ(n + 1); }, 200); })(0);
+window.__show = show;
+</script>
+</body>
+</html>
