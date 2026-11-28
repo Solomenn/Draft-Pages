@@ -265,7 +265,7 @@
   <p class="gist">本质上是，和 PPO 一样，拿现在的策略模型和写回答时的策略模型比，同一个 token 的概率变成了几倍，按优势推这个倍数，倍数一超出 0.8 到 1.2 就不再往有利方向推；设了 beta 时，再把离参考模型的 KL 加进损失。</p>
   <div class="legend" id="u-legend" aria-label="图例"></div>
   <div class="stage">
-    <svg class="diagram" id="u-diagram" viewBox="0 0 1000 670" role="group" aria-label="策略怎么更新：比率、截断和 KL">
+    <svg class="diagram" id="u-diagram" viewBox="0 0 1000 640" role="group" aria-label="策略怎么更新：比率、截断和 KL">
       <defs><marker id="u-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="u-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="u-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
       <g id="u-draw"></g>
     </svg>
@@ -648,7 +648,7 @@ function n(title, rows) { return { title: title, rows: rows }; }
 /* ===== 第 3 页：策略怎么更新 ===== */
 (function () {
   var TX = 250, CW = 116, FX = 845;
-  var Y = [70, 116, 162, 208, 254, 300, 346, 392];
+  var Y = [70, 116, 162, 208, 254, 300, 346];
 
   function plot(A, root, x, y, w, h, pos, s) {
     var x0 = x + 30, x1 = x + w, ylo = pos ? 0 : -1.2, yhi = pos ? 2.4 : 0;
@@ -706,8 +706,7 @@ function n(title, rows) { return { title: title, rows: rows }; }
         ["优势", av, 2, "每个 token 一样"],
         ["比率 × 优势", s1, 3, ""],
         ["截断后的比率 × 优势", s2, 3, "比率限制在 0.8 到 1.2"],
-        ["取较小", mn, 3, "两行里小的那个"],
-        ["每个 token 的损失", mn.map(function (v) { return -v; }), 3, "= −取较小"]
+        ["取较小", mn, 3, "损失 = −取较小"]
       ];
     }
     A.mk("text", { "class": "glabel", x: TX - 8, y: 42, "text-anchor": "end" }, root, s.mode === "kl" || s.ans !== 2 ? "回答 1" : "回答 2");
@@ -715,12 +714,12 @@ function n(title, rows) { return { title: title, rows: rows }; }
     rows.forEach(function (r, i) {
       if (i >= s.rows) return;
       var o = { dig: r[2], id: "u_" + (s.mode || "pg") + i };
-      if (i === s.rows - 1 && (!s.cut || s.hiLast)) o.hi = true;
+      if (i === s.rows - 1 && !s.cut) o.hi = true;
       if (s.cut && i === s.cutRow) o.cut = s.cut;
       numRow(A, root, TX, Y[i], CW, r[0], r[1], o);
       if (r[3]) A.mk("text", { "class": "formula", x: FX, y: Y[i] + 19 }, root, r[3]);
     });
-    if (s.plot) { plot(A, root, 70, 470, 380, 160, true, s); plot(A, root, 560, 470, 380, 160, false, s); }
+    if (s.plot) { plot(A, root, 70, 440, 380, 160, true, s); plot(A, root, 560, 440, 380, 160, false, s); }
   }
 
   var STEPS = [
@@ -736,16 +735,16 @@ function n(title, rows) { return { title: title, rows: rows }; }
     { rows: 6, cut: [0], cutRow: 5,
       say: "GRPO 和 PPO 一样，先把比率限制在 0.8 到 1.2 之间（epsilon = 0.2），再乘以优势。第 1 个 token 的比率 1.284 超过 1.2，被截成 1.2，截断后的比率 × 优势 = 1.2 × 1.5 = 1.8。其余 4 个 token 的比率都在范围内，两行数一样。",
       code: "coef_2 = torch.clamp(coef_1, 1 - self.epsilon_low, 1 + self.epsilon_high)   # 0.8 到 1.2\nper_token_loss2 = coef_2 * advantages" },
-    { rows: 8, cut: [0], cutRow: 6, hiLast: true,
-      say: "每个 token 在两行里取较小的那个。第 1 个 token 取到截断后的 1.8：这个数里的 1.2 是常数，不随策略模型变化，所以第 1 个 token 这一次不产生梯度，策略模型不再推高它。其余 4 个 token 取到的就是比率 × 优势，继续被推高。最后给取较小加一个负号，得到每个 token 的损失：优化器只会把损失往小推，损失 = −取较小，把损失推小就是把取较小推大。回答 1 的 5 个 token 的损失是 −1.800、−1.576、−1.530、−1.561、−1.530。",
+    { rows: 7, cut: [0], cutRow: 6,
+      say: "每个 token 在两行里取较小的那个。第 1 个 token 取到截断后的 1.8：这个数里的 1.2 是常数，不随策略模型变化，所以第 1 个 token 这一次不产生梯度，策略模型不再推高它。其余 4 个 token 取到的就是比率 × 优势，继续被推高。",
       code: "per_token_loss = -torch.min(per_token_loss1, per_token_loss2)" },
-    { ans: 2, rows: 8, cut: [1, 3], cutRow: 6,
+    { ans: 2, rows: 7, cut: [1, 3], cutRow: 6,
       say: "再看回答 2，优势是 −0.5。第 1 个 token“(42”和回答 1 的第 1 个 token 一样、前面的内容也一样，所以新旧 logp 都和回答 1 相同，比率也是 1.284。优势为负时，比率大于 1.2 不截断：取较小取到 −0.642，策略模型继续压低它。第 2 个 token“+”和第 4 个 token“/”的比率低于 0.8，取较小取到截断后的 −0.4，已经压得够低，不再往下压。",
       code: "# 优势 < 0：min 取到的是更负的那个；比率 < 0.8 时取到常数 −0.4，梯度为 0" },
-    { ans: 2, rows: 8, cut: [1, 3], cutRow: 6, plot: true,
+    { ans: 2, rows: 7, cut: [1, 3], cutRow: 6, plot: true,
       say: "下面两张图画出“取较小”随比率怎么变。回答 1 优势为正：比率超过 1.2 以后线是平的，“(42”停在这里。回答 2 优势为负：比率低于 0.8 以后线是平的，“/”停在这里；比率往变差的方向走（大于 1）时线不平，所以回答 2 的“(42”还会被压低。回答 1 推高“(42”，回答 2 压低“(42”，这个共有的 token 两边拉扯。",
       code: "# 优势 > 0：比率 > 1.2 时梯度为 0\n# 优势 < 0：比率 < 0.8 时梯度为 0" },
-    { ans: 2, rows: 8, cut: [1, 3], cutRow: 6,
+    { ans: 2, rows: 7, cut: [1, 3], cutRow: 6,
       say: "4 个回答一共 20 个 token，每个 token 的损失是 −取较小。TRL 默认 loss_type = \"dapo\"：把所有回答所有 token 的损失加起来，除以 token 的总个数 20，得到这一组的损失。优化器把损失往小推。",
       code: "loss = (per_token_loss * mask).sum() / normalizer   # normalizer：这一批里 token 的总个数" },
     { mode: "kl", rows: 5,
@@ -761,7 +760,6 @@ function n(title, rows) { return { title: title, rows: rows }; }
     u_pg4: n("比率 × 优势", [["是什么", "不加限制时要往大推的量。代码里叫 per_token_loss1。"]]),
     u_pg5: n("截断后的比率 × 优势", [["是什么", "比率先限制在 [1 − epsilon, 1 + epsilon]，再乘以优势。epsilon 在 TRL 里默认 0.2。代码里叫 per_token_loss2。"]]),
     u_pg6: n("取较小", [["是什么", "每个 token 在两行里取较小的。每个 token 的损失 = −取较小。"], ["结果", "比率已经往有利方向走出范围时，取到的是常数，梯度为 0；其余情况照常推。"]]),
-    u_pg7: n("每个 token 的损失", [["是什么", "−取较小。代码里叫 per_token_loss。"], ["为什么加负号", "优化器只会把损失往小推。损失 = −取较小，损失变小，取较小就变大，也就是把比率 × 优势往大推。"]]),
     u_kl0: n("新 logp", [["是什么", "当前的策略模型给回答 1 每个 token 的 logp。"]]),
     u_kl1: n("参考 logp", [["是什么", "参考模型给回答 1 每个 token 的 logp。参考模型是训练开始前策略模型的拷贝，不更新。"]]),
     u_kl2: n("参考 logp − 新 logp", [["是什么", "ln(参考模型给的概率 ÷ 策略模型给的概率)，下一行记作 x。"]]),
