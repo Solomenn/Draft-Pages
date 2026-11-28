@@ -209,7 +209,7 @@
   <p class="gist">本质上是，策略模型对同一道题写一组回答，奖励函数给每个回答判分，判分比这组平均高的回答，每个 token 都被推高，比平均低的，每个 token 都被压低。</p>
   <div class="legend" id="o-legend" aria-label="图例"></div>
   <div class="stage">
-    <svg class="diagram" id="o-diagram" viewBox="0 0 1000 500" role="group" aria-label="GRPO 一步训练：Countdown 题 [42, 32, 5] → 50">
+    <svg class="diagram" id="o-diagram" viewBox="0 0 1000 780" role="group" aria-label="GRPO 一步训练：Countdown 题 [42, 32, 5] → 50">
       <defs><marker id="o-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="o-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="o-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
       <g id="o-draw"></g>
     </svg>
@@ -494,6 +494,7 @@ function n(title, rows) { return { title: title, rows: rows }; }
 (function () {
   var MX = 20, MW = 330, AX = 560, AW = 170, SX = 760, SW = 96, VX = 880;
   var MY = { q: 20, pol: 100, rew: 180, ref: 290, vm: 370 };
+  var TKX = 570, TKW = 80;
   var RY = [60, 100, 140, 180];
 
   function draw(A, root, s) {
@@ -522,8 +523,21 @@ function n(title, rows) { return { title: title, rows: rows }; }
     function h(y, y2) { return "M" + (MX + MW + 2) + " " + y + " H460 V" + y2 + " H" + (AX - 64); }
     if (a.indexOf("write") >= 0) A.arrow(root, h(MY.pol + 30, 114));
     if (a.indexOf("rew") >= 0) A.arrow(root, "M" + (MX + MW + 2) + " " + (MY.rew + 30) + " H740 V" + (RY[3] + 42) + " H" + (SX + SW / 2) + " V" + (RY[3] + 32));
-    if (a.indexOf("upd") >= 0) { A.arrow(root, "M" + (VX + SW / 2) + " " + (RY[3] + 32) + " V340 H420 V" + (MY.pol + 44) + " H" + (MX + MW + 4), "warm"); A.label(root, 428, 362, "推高回答 1 的每个 token，压低回答 2、3、4 的每个 token", "warm"); }
-    if (st === 9) A.label(root, MX, 470, "下一批题目：每道题重新写一组回答，重新判分、重新算优势", "warm");
+    if (st >= 6) {
+      [[D.tok1, 0], [D.tok2, 1]].forEach(function (b, bi) {
+        var y0 = 360 + bi * 160, av = D.adv[b[1]];
+        A.mk("text", { "class": "glabel", x: TKX - 8, y: y0 + 18, "text-anchor": "end" }, root, "回答 " + (bi + 1));
+        tokRow(A, root, TKX, y0, TKW, b[0]);
+        numRow(A, root, TKX, y0 + 36, TKW, "优势", [av, av, av, av, av], { dig: 2, hi: st === 6 });
+        if (st >= 7) {
+          numRow(A, root, TKX, y0 + 76, TKW, "比率", [1, 1, 1, 1, 1], { dig: 2 });
+          numRow(A, root, TKX, y0 + 116, TKW, "每个 token 的损失", [-av, -av, -av, -av, -av], { dig: 2, hi: st === 7, id: "o_loss" + bi });
+        }
+      });
+      if (st >= 8) numRow(A, root, TKX + 4 * TKW, 690, TKW, "这一组的损失：20 个 token 的损失加起来 ÷ 20", [0], { dig: 2, hi: st === 8, id: "o_total" });
+    }
+    if (a.indexOf("upd") >= 0) { A.arrow(root, "M" + (TKX + 4.5 * TKW) + " 718 V738 H420 V" + (MY.pol + 44) + " H" + (MX + MW + 4), "warm"); A.label(root, 428, 762, "推高回答 1 的每个 token，压低回答 2、3、4 的每个 token", "warm"); }
+    if (st === 10) A.label(root, MX, 470, "下一批题目：每道题重新写一组回答，重新判分、重新算优势", "warm");
   }
 
   var STEPS = [
@@ -545,13 +559,16 @@ function n(title, rows) { return { title: title, rows: rows }; }
     { stage: 6, hotCols: ["adv"],
       say: "一个回答只有一个优势，这个回答里的每个 token 都用它：回答 1 的 5 个 token 的优势都是 1.5，回答 2 的 5 个 token 的优势都是 −0.5。PPO 用价值模型给每个 token 各算一个优势；GRPO 不分 token。",
       code: "advantages = advantages.unsqueeze(1)   # 每个回答一个数，广播到这个回答的每个 token" },
-    { stage: 7, hot: ["pol"], arrows: ["upd"],
-      say: "策略模型按优势更新：优势为正的回答 1，它的每个 token 的 logp 被推高；优势为负的回答 2、3、4，它们的每个 token 的 logp 被压低。和 PPO 一样，GRPO 用新 logp 和旧 logp 的比率限制每次改多少：比率超出 0.8 到 1.2 后，就不再往有利方向改。“策略怎么更新”那一页逐步算。",
-      code: "coef_1 = torch.exp(per_token_logps - old_per_token_logps)\ncoef_2 = torch.clamp(coef_1, 1 - 0.2, 1 + 0.2)\nper_token_loss = -torch.min(coef_1 * advantages, coef_2 * advantages)" },
-    { stage: 8, hot: ["ref"],
+    { stage: 7,
+      say: "每个 token 的优势先变成每个 token 的损失。比率 = e^(新 logp − 旧 logp)：TRL 默认每写一组回答只更新一次（num_iterations = 1），更新时策略模型还没变，新 logp 等于旧 logp，所以每个 token 的比率都是 e^0 = 1，落在 0.8 到 1.2 之间，截断用不上。每个 token 的损失 = −取较小(比率 × 优势, 截断后的比率 × 优势) = −1 × 优势：回答 1 的 5 个 token 的损失都是 −1 × 1.5 = −1.5，回答 2 的 5 个 token 的损失都是 −1 × (−0.5) = 0.5；回答 3、4 和回答 2 一样，每个 token 的损失也是 0.5。",
+      code: "coef_1 = torch.exp(per_token_logps - old_per_token_logps)   # num_iterations = 1 时全是 1\ncoef_2 = torch.clamp(coef_1, 1 - 0.2, 1 + 0.2)\nper_token_loss = -torch.min(coef_1 * advantages, coef_2 * advantages)" },
+    { stage: 8, hot: ["pol"], arrows: ["upd"],
+      say: "TRL 默认 loss_type = \"dapo\"：把 4 个回答一共 20 个 token 的损失加起来，除以 token 的总个数 20，得到这一组的损失 = (5 × (−1.5) + 15 × 0.5) ÷ 20 = 0。损失的值是 0，但它对每个 token 的新 logp 的导数不是 0：比率 = e^(新 logp − 旧 logp) 对新 logp 求导还是比率，等于 1，所以回答 1 每个 token 的导数是 −1.5 ÷ 20 = −0.075，回答 2、3、4 每个 token 的导数是 0.5 ÷ 20 = 0.025。优化器把损失往小推，沿导数的反方向改策略模型：回答 1 每个 token 的 logp 被推高，回答 2、3、4 每个 token 的 logp 被压低。",
+      code: "loss = (per_token_loss * mask).sum() / normalizer   # normalizer = 20：这一批里 token 的总个数\nloss.backward(); optimizer.step()" },
+    { stage: 9, hot: ["ref"],
       say: "TRL 默认 beta = 0：损失里没有 KL 项，参考模型不加载。设了 beta（GRPO 论文用 0.04，DeepSeek-R1 用 0.001）时，参考模型给每个 token 算参考 logp，策略模型离参考模型的 KL 乘以 beta 后直接加进损失。PPO 是把 KL 惩罚加进奖励，GRPO 是加进损失。",
       code: "if self.beta != 0.0:\n    per_token_loss = per_token_loss + self.beta * per_token_kl" },
-    { stage: 9, hot: ["q", "pol"],
+    { stage: 10, hot: ["q", "pol"],
       say: "下一步训练读下一批题目：策略模型对每道题重新写一组回答，奖励函数重新判分，再算平均、标准差和优势。和 DPO 不同，GRPO 的回答是训练中由策略模型自己写的。",
       code: "for step in range(max_steps):\n    batch = generate_and_score_completions(prompts)   # 写一组回答、判分、算优势\n    loss = compute_loss(model, batch); loss.backward(); optimizer.step()" }
   ];
@@ -565,6 +582,9 @@ function n(title, rows) { return { title: title, rows: rows }; }
     row_score: n("判分", [["是什么", "奖励函数给整个回答的分数：答对 1，答错 0。"], ["例子", "回答 1 是 1，回答 2、3、4 是 0。"]]),
     row_mean: n("这组回答判分的平均", [["是什么", "同一道题 4 个回答的判分相加再除以 4。代码里叫 mean_grouped_rewards。"], ["例子", "(1 + 0 + 0 + 0) ÷ 4 = 0.25。"]]),
     row_std: n("这组回答判分的标准差", [["是什么", "这组判分离平均有多远。代码里叫 std_rewards。"], ["例子", "0.5，“优势怎么算”那一页逐步算。"]]),
+    o_loss0: n("回答 1 每个 token 的损失", [["是什么", "−取较小(比率 × 优势, 截断后的比率 × 优势)。代码里叫 per_token_loss。"], ["例子", "比率是 1，优势是 1.5，每个 token 的损失 = −1 × 1.5 = −1.5。"]]),
+    o_loss1: n("回答 2 每个 token 的损失", [["是什么", "−取较小(比率 × 优势, 截断后的比率 × 优势)。代码里叫 per_token_loss。"], ["例子", "比率是 1，优势是 −0.5，每个 token 的损失 = −1 × (−0.5) = 0.5。回答 3、4 一样。"]]),
+    o_total: n("这一组的损失", [["是什么", "4 个回答 20 个 token 的损失加起来，除以 token 的总个数 20（TRL 默认 loss_type = \"dapo\"）。"], ["例子", "(5 × (−1.5) + 15 × 0.5) ÷ 20 = 0。值是 0，导数不是 0：回答 1 每个 token 是 −0.075，回答 2、3、4 每个 token 是 0.025。"]]),
     row_adv: n("优势", [["是什么", "(判分 − 平均) ÷ 标准差。正数表示这个回答比这组的平均好，负数表示比平均差。"], ["用在哪", "这个回答里的每个 token 都用这一个优势。"]])
   };
 
