@@ -141,7 +141,7 @@
   .sample-cap { color: var(--muted); font-size: 13.5px; margin-bottom: 4px !important; }
 
   .caption { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-height: 140px; display: flex; flex-direction: column; gap: 12px; }
-  .caption .say { margin: 0; font-size: 19px; line-height: 1.65; font-weight: 500; max-width: 42em; text-wrap: pretty; }
+  .caption .say { margin: 0; font-size: 19px; line-height: 1.65; font-weight: 500; max-width: 42em; text-wrap: pretty; white-space: pre-line; }
   .caption .code { margin: 0; font-family: var(--font-code); font-size: 13px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; white-space: pre-wrap; }
 
   .nav { display: flex; align-items: center; gap: 14px; }
@@ -209,7 +209,7 @@
   <p class="gist">本质上是，策略模型对同一道题写一组回答，奖励函数给每个回答判分，判分比这组平均高的回答，每个 token 都被推高，比平均低的，每个 token 都被压低。</p>
   <div class="legend" id="o-legend" aria-label="图例"></div>
   <div class="stage">
-    <svg class="diagram" id="o-diagram" viewBox="0 0 1000 780" role="group" aria-label="GRPO 一步训练：Countdown 题 [42, 32, 5] → 50">
+    <svg class="diagram" id="o-diagram" viewBox="0 0 1000 840" role="group" aria-label="GRPO 一步训练：Countdown 题 [42, 32, 5] → 50">
       <defs><marker id="o-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"></path></marker><marker id="o-headm" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--muted)"></path></marker><marker id="o-headw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="var(--warm)"></path></marker></defs>
       <g id="o-draw"></g>
     </svg>
@@ -313,7 +313,7 @@
 var D = {"ans": ["(42 - 32) * 5", "(42 + 32) / 5", "42 + 32 - 5", "42 - 32 + 5"], "score": [1, 0, 0, 0], "mean": 0.25, "std": 0.5, "adv": [1.5, -0.5, -0.5, -0.5],
   "tok1": ["(42", " -", " 32)", " *", " 5"], "tok2": ["(42", " +", " 32)", " /", " 5"], "A1": 1.5, "A2": -0.5,
   "old1": [-1.1, -0.3, -0.9, -0.4, -0.2], "new1": [-0.85, -0.25, -0.88, -0.36, -0.18], "ratio1": [1.284, 1.051, 1.020, 1.041, 1.020],
-  "old2": [-1.1, -1.2, -0.6, -2.0, -0.5], "new2": [-0.85, -1.5, -0.65, -2.6, -0.55], "ratio2": [1.284, 0.741, 0.951, 0.549, 0.951],
+  "old2": [-1.1, -1.2, -0.6, -2.0, -0.5], "new2": [-0.85, -1.5, -0.65, -2.6, -0.55], "ratio2": [1.284, 0.741, 0.951, 0.549, 0.951], "ratio3": [0.98, 0.83, 0.97, 0.76, 0.95], "ratio4": [0.98, 1.02, 0.96, 0.88, 0.94],
   "ref1": [-1.3, -0.4, -0.7, -0.6, -0.3], "x1": [-0.45, -0.15, 0.18, -0.24, -0.12], "k1": [0.0876, 0.0107, 0.0172, 0.0266, 0.0069], "bk1": [0.00351, 0.00043, 0.00069, 0.00107, 0.00028]};
 
 var SVGNS = "http://www.w3.org/2000/svg";
@@ -495,6 +495,15 @@ function n(title, rows) { return { title: title, rows: rows }; }
   var MX = 20, MW = 330, AX = 560, AW = 170, SX = 760, SW = 96, VX = 880;
   var MY = { q: 20, pol: 100, rew: 180, ref: 290, vm: 370 };
   var TKX = 570, TKW = 80;
+  /* 每个 token 的损失 = −取较小(比率 × 优势, 截断后的比率 × 优势)；cut 记下取到截断后的 token */
+  function tokLoss(r, a) {
+    var cut = [], loss = r.map(function (x, j) {
+      var c = Math.min(Math.max(x, 0.8), 1.2) * a;
+      if (c < x * a) cut.push(j);
+      return -Math.min(x * a, c);
+    });
+    return { loss: loss, cut: cut };
+  }
   var RY = [60, 100, 140, 180];
 
   function draw(A, root, s) {
@@ -524,19 +533,24 @@ function n(title, rows) { return { title: title, rows: rows }; }
     if (a.indexOf("write") >= 0) A.arrow(root, h(MY.pol + 30, 114));
     if (a.indexOf("rew") >= 0) A.arrow(root, "M" + (MX + MW + 2) + " " + (MY.rew + 30) + " H740 V" + (RY[3] + 42) + " H" + (SX + SW / 2) + " V" + (RY[3] + 32));
     if (st >= 6) {
-      [[D.tok1, 0], [D.tok2, 1]].forEach(function (b, bi) {
-        var y0 = 360 + bi * 160, av = D.adv[b[1]];
+      [[D.tok1, 0, D.ratio1], [D.tok2, 1, D.ratio2]].forEach(function (b, bi) {
+        var y0 = 360 + bi * 160, av = D.adv[b[1]], L = tokLoss(b[2], av);
         A.mk("text", { "class": "glabel", x: TKX - 8, y: y0 + 18, "text-anchor": "end" }, root, "回答 " + (bi + 1));
         tokRow(A, root, TKX, y0, TKW, b[0]);
         numRow(A, root, TKX, y0 + 36, TKW, "优势", [av, av, av, av, av], { dig: 2, hi: st === 6 });
         if (st >= 7) {
-          numRow(A, root, TKX, y0 + 76, TKW, "比率", [1, 1, 1, 1, 1], { dig: 2 });
-          numRow(A, root, TKX, y0 + 116, TKW, "每个 token 的损失", [-av, -av, -av, -av, -av], { dig: 2, hi: st === 7, id: "o_loss" + bi });
+          numRow(A, root, TKX, y0 + 76, TKW, "比率", b[2], { dig: 3, cut: L.cut });
+          numRow(A, root, TKX, y0 + 116, TKW, "每个 token 的损失", L.loss, { dig: 3, hi: st === 7, cut: L.cut, id: "o_loss" + bi });
         }
       });
-      if (st >= 8) numRow(A, root, TKX + 4 * TKW, 690, TKW, "这一组的损失：20 个 token 的损失加起来 ÷ 20", [0], { dig: 2, hi: st === 8, id: "o_total" });
+      if (st >= 8) {
+        var avgs = [D.ratio1, D.ratio2, D.ratio3, D.ratio4].map(function (r, k) { return tokLoss(r, D.adv[k]).loss.reduce(function (x, y) { return x + y; }, 0) / 5; });
+        ["回答 1", "回答 2", "回答 3", "回答 4"].forEach(function (c, k) { A.mk("text", { "class": "glabel", x: TKX + k * TKW + TKW / 2, y: 698, "text-anchor": "middle" }, root, c); });
+        numRow(A, root, TKX, 706, TKW, "每个回答的损失平均", avgs, { dig: 3, id: "o_avgs" });
+        numRow(A, root, TKX + 4 * TKW, 756, TKW, "这一组的损失 = 4 个平均再求平均", [avgs.reduce(function (x, y) { return x + y; }, 0) / 4], { dig: 4, hi: true, id: "o_total" });
+      }
     }
-    if (a.indexOf("upd") >= 0) { A.arrow(root, "M" + (TKX + 4.5 * TKW) + " 718 V738 H420 V" + (MY.pol + 44) + " H" + (MX + MW + 4), "warm"); A.label(root, 428, 762, "推高回答 1 的每个 token，压低回答 2、3、4 的每个 token", "warm"); }
+    if (a.indexOf("upd") >= 0) { A.arrow(root, "M" + (TKX + 4.5 * TKW) + " 784 V800 H420 V" + (MY.pol + 44) + " H" + (MX + MW + 4), "warm"); A.label(root, 428, 824, "推高回答 1 的 token，压低回答 2、3、4 的 token；被截断的 token 这一次不动", "warm"); }
     if (st === 10) A.label(root, MX, 470, "下一批题目：每道题重新写一组回答，重新判分、重新算优势", "warm");
   }
 
@@ -560,11 +574,11 @@ function n(title, rows) { return { title: title, rows: rows }; }
       say: "一个回答只有一个优势，这个回答里的每个 token 都用它：回答 1 的 5 个 token 的优势都是 1.5，回答 2 的 5 个 token 的优势都是 −0.5。PPO 用价值模型给每个 token 各算一个优势；GRPO 不分 token。",
       code: "advantages = advantages.unsqueeze(1)   # 每个回答一个数，广播到这个回答的每个 token" },
     { stage: 7,
-      say: "每个 token 的优势先变成每个 token 的损失。比率 = e^(新 logp − 旧 logp)：TRL 默认每写一组回答只更新一次（num_iterations = 1），更新时策略模型还没变，新 logp 等于旧 logp，所以每个 token 的比率都是 e^0 = 1，落在 0.8 到 1.2 之间，截断用不上。每个 token 的损失 = −取较小(比率 × 优势, 截断后的比率 × 优势) = −1 × 优势：回答 1 的 5 个 token 的损失都是 −1 × 1.5 = −1.5，回答 2 的 5 个 token 的损失都是 −1 × (−0.5) = 0.5；回答 3、4 和回答 2 一样，每个 token 的损失也是 0.5。",
-      code: "coef_1 = torch.exp(per_token_logps - old_per_token_logps)   # num_iterations = 1 时全是 1\ncoef_2 = torch.clamp(coef_1, 1 - 0.2, 1 + 0.2)\nper_token_loss = -torch.min(coef_1 * advantages, coef_2 * advantages)" },
+      say: "例子设同一组回答用 2 次（num_iterations = 2；TRL 默认是 1）。第 1 次更新后策略模型变了，第 2 次更新时每个 token 的比率 = e^(新 logp − 旧 logp)，不再是 1。\n每个 token 的损失 = −取较小(比率 × 优势, 截断后的比率 × 优势)，截断把比率限制在 0.8 到 1.2。\n回答 1 的“(42”：比率 1.284 超过 1.2，取较小取到 1.2 × 1.5 = 1.8，损失 = −1.8。\n回答 1 的“-”：比率 1.051 没被截断，损失 = −1.051 × 1.5 = −1.576。\n回答 2 的“+”：比率 0.741 低于 0.8，取较小取到 0.8 × (−0.5) = −0.4，损失 = 0.4。\n回答 2 的“(42”：比率 1.284，取较小取到 1.284 × (−0.5) = −0.642，损失 = 0.642。",
+      code: "coef_1 = torch.exp(per_token_logps - old_per_token_logps)   # 比率\ncoef_2 = torch.clamp(coef_1, 1 - 0.2, 1 + 0.2)               # 截断后的比率\nper_token_loss = -torch.min(coef_1 * advantages, coef_2 * advantages)" },
     { stage: 8, hot: ["pol"], arrows: ["upd"],
-      say: "TRL 默认 loss_type = \"dapo\"：把 4 个回答一共 20 个 token 的损失加起来，除以 token 的总个数 20，得到这一组的损失 = (5 × (−1.5) + 15 × 0.5) ÷ 20 = 0。损失的值是 0，但它对每个 token 的新 logp 的导数不是 0：比率 = e^(新 logp − 旧 logp) 对新 logp 求导还是比率，等于 1，所以回答 1 每个 token 的导数是 −1.5 ÷ 20 = −0.075，回答 2、3、4 每个 token 的导数是 0.5 ÷ 20 = 0.025。优化器把损失往小推，沿导数的反方向改策略模型：回答 1 每个 token 的 logp 被推高，回答 2、3、4 每个 token 的 logp 被压低。",
-      code: "loss = (per_token_loss * mask).sum() / normalizer   # normalizer = 20：这一批里 token 的总个数\nloss.backward(); optimizer.step()" },
+      say: "GRPO 的损失分两步求平均：先在每个回答里，把它 5 个 token 的损失求平均；再把 4 个回答的平均求平均。\n回答 1：5 个 token 的损失之和 −7.998，÷ 5 = −1.600。回答 2：2.393 ÷ 5 = 0.479。回答 3：2.265 ÷ 5 = 0.453。回答 4：2.390 ÷ 5 = 0.478。\n这一组的损失 = (−1.600 + 0.479 + 0.453 + 0.478) ÷ 4 = −0.0475。\n优化器把损失往小推：回答 1 的 token 损失是 −比率 × 1.5，logp 变大，比率变大，损失变小，所以被推高；回答 2、3、4 的 token 损失是 比率 × 0.5，logp 变小，损失变小，所以被压低。\n取到截断后常数的 token（回答 1 的“(42”，回答 2 的“+”和“/”，回答 3 的第 4 个 token），损失不随 logp 变，这一次不被推动。",
+      code: "loss = ((per_token_loss * mask).sum(-1) / mask.sum(-1)).mean()   # 先在每个回答里求平均，再在回答之间求平均\nloss.backward(); optimizer.step()" },
     { stage: 9, hot: ["ref"],
       say: "TRL 默认 beta = 0：损失里没有 KL 项，参考模型不加载。设了 beta（GRPO 论文用 0.04，DeepSeek-R1 用 0.001）时，参考模型给每个 token 算参考 logp，策略模型离参考模型的 KL 乘以 beta 后直接加进损失。PPO 是把 KL 惩罚加进奖励，GRPO 是加进损失。",
       code: "if self.beta != 0.0:\n    per_token_loss = per_token_loss + self.beta * per_token_kl" },
@@ -582,9 +596,10 @@ function n(title, rows) { return { title: title, rows: rows }; }
     row_score: n("判分", [["是什么", "奖励函数给整个回答的分数：答对 1，答错 0。"], ["例子", "回答 1 是 1，回答 2、3、4 是 0。"]]),
     row_mean: n("这组回答判分的平均", [["是什么", "同一道题 4 个回答的判分相加再除以 4。代码里叫 mean_grouped_rewards。"], ["例子", "(1 + 0 + 0 + 0) ÷ 4 = 0.25。"]]),
     row_std: n("这组回答判分的标准差", [["是什么", "这组判分离平均有多远。代码里叫 std_rewards。"], ["例子", "0.5，“优势怎么算”那一页逐步算。"]]),
-    o_loss0: n("回答 1 每个 token 的损失", [["是什么", "−取较小(比率 × 优势, 截断后的比率 × 优势)。代码里叫 per_token_loss。"], ["例子", "比率是 1，优势是 1.5，每个 token 的损失 = −1 × 1.5 = −1.5。"]]),
-    o_loss1: n("回答 2 每个 token 的损失", [["是什么", "−取较小(比率 × 优势, 截断后的比率 × 优势)。代码里叫 per_token_loss。"], ["例子", "比率是 1，优势是 −0.5，每个 token 的损失 = −1 × (−0.5) = 0.5。回答 3、4 一样。"]]),
-    o_total: n("这一组的损失", [["是什么", "4 个回答 20 个 token 的损失加起来，除以 token 的总个数 20（TRL 默认 loss_type = \"dapo\"）。"], ["例子", "(5 × (−1.5) + 15 × 0.5) ÷ 20 = 0。值是 0，导数不是 0：回答 1 每个 token 是 −0.075，回答 2、3、4 每个 token 是 0.025。"]]),
+    o_loss0: n("回答 1 每个 token 的损失", [["是什么", "−取较小(比率 × 优势, 截断后的比率 × 优势)。代码里叫 per_token_loss。"], ["例子", "“(42”：比率 1.284 截成 1.2，损失 = −1.2 × 1.5 = −1.8；“-”：损失 = −1.051 × 1.5 = −1.576。"]]),
+    o_loss1: n("回答 2 每个 token 的损失", [["是什么", "−取较小(比率 × 优势, 截断后的比率 × 优势)。代码里叫 per_token_loss。"], ["例子", "“+”：比率 0.741 截成 0.8，损失 = −0.8 × (−0.5) = 0.4；“(42”：损失 = −1.284 × (−0.5) = 0.642。"]]),
+    o_avgs: n("每个回答的损失平均", [["是什么", "这个回答 5 个 token 的损失加起来，再除以 5。"], ["回答 3、4", "比率是例子设的：回答 3 是 0.98、0.83、0.97、0.76、0.95，回答 4 是 0.98、1.02、0.96、0.88、0.94；回答 3 的第 4 个 token 比率 0.76 被截成 0.8。"]]),
+    o_total: n("这一组的损失", [["是什么", "GRPO 先在每个回答里对 token 的损失求平均，再对 4 个回答的平均求平均。"], ["例子", "(−1.600 + 0.479 + 0.453 + 0.478) ÷ 4 = −0.0475。"]]),
     row_adv: n("优势", [["是什么", "(判分 − 平均) ÷ 标准差。正数表示这个回答比这组的平均好，负数表示比平均差。"], ["用在哪", "这个回答里的每个 token 都用这一个优势。"]])
   };
 
@@ -765,8 +780,8 @@ function n(title, rows) { return { title: title, rows: rows }; }
       say: "下面两张图画出“取较小”随比率怎么变。回答 1 优势为正：比率超过 1.2 以后线是平的，“(42”停在这里。回答 2 优势为负：比率低于 0.8 以后线是平的，“/”停在这里；比率往变差的方向走（大于 1）时线不平，所以回答 2 的“(42”还会被压低。回答 1 推高“(42”，回答 2 压低“(42”，这个共有的 token 两边拉扯。",
       code: "# 优势 > 0：比率 > 1.2 时梯度为 0\n# 优势 < 0：比率 < 0.8 时梯度为 0" },
     { ans: 2, rows: 7, cut: [1, 3], cutRow: 6,
-      say: "4 个回答一共 20 个 token，每个 token 的损失是 −取较小。TRL 默认 loss_type = \"dapo\"：把所有回答所有 token 的损失加起来，除以 token 的总个数 20，得到这一组的损失。优化器把损失往小推。",
-      code: "loss = (per_token_loss * mask).sum() / normalizer   # normalizer：这一批里 token 的总个数" },
+      say: "每个 token 的损失是 −取较小。GRPO 先在每个回答里，把它 5 个 token 的损失求平均；再把 4 个回答的平均求平均，得到这一组的损失。优化器把损失往小推。",
+      code: "loss = ((per_token_loss * mask).sum(-1) / mask.sum(-1)).mean()   # 先在每个回答里求平均，再在回答之间求平均" },
     { mode: "kl", rows: 5,
       say: "设了 beta 时，每个 token 的损失还要加 beta × KL。参考模型给回答 1 每个 token 算参考 logp。第 1 个 token：x = 参考 logp − 新 logp = −1.3 − (−0.85) = −0.45，KL = e^(−0.45) − (−0.45) − 1 ≈ 0.0876。这个算法算出的 KL 不会小于 0，策略模型离参考模型越远越大。beta = 0.04 时，第 1 个 token 的损失多加 0.0035。",
       code: "per_token_kl = torch.exp(ref_per_token_logps - per_token_logps) - (ref_per_token_logps - per_token_logps) - 1\nper_token_loss = per_token_loss + self.beta * per_token_kl" }
